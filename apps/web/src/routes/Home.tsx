@@ -3,6 +3,7 @@ import type { AccountSummary } from '@budjo/shared';
 import { formatCents, formatPeriod } from '@budjo/shared';
 import { useAccounts, useMe, usePendingChecks } from '../lib/hooks';
 import { Button, Card, ErrorNote, Spinner } from '../components/ui';
+import { PendingList } from '../components/PendingList';
 
 export function Home() {
   const me = useMe();
@@ -19,7 +20,6 @@ export function Home() {
   const mine = summaries.find((s) => s.account.kind === 'personal' && s.account.ownerUserId === userId);
   const joint = summaries.filter((s) => s.account.kind === 'joint');
   const others = summaries.filter((s) => s !== mine && s.account.kind !== 'joint');
-  const pendingCount = pending.data?.checks.length ?? 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -33,17 +33,6 @@ export function Home() {
         </Card>
       ) : null}
 
-      {pendingCount > 0 ? (
-        <Link to="/pending">
-          <Card className="flex items-center justify-between p-4">
-            <span className="text-sm">
-              {pendingCount} spend {pendingCount === 1 ? 'check is' : 'checks are'} waiting to be settled
-            </span>
-            <span className="muted">›</span>
-          </Card>
-        </Link>
-      ) : null}
-
       <div className="mt-2 flex flex-col gap-2">
         <Link to="/check">
           <Button className="w-full text-lg">Can I spend?</Button>
@@ -52,6 +41,12 @@ export function Home() {
           <Button variant="secondary" className="w-full">Log a spend I already made</Button>
         </Link>
       </div>
+
+      <PendingList
+        checks={pending.data?.checks ?? []}
+        accounts={summaries}
+        spendableAccountIds={me.data?.spendableAccountIds ?? []}
+      />
     </div>
   );
 }

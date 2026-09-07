@@ -4,7 +4,6 @@ import { Spinner } from './components/ui';
 import { Login } from './routes/Login';
 import { Home } from './routes/Home';
 import { SpendCheck } from './routes/SpendCheck';
-import { Pending } from './routes/Pending';
 import { History } from './routes/History';
 import { Admin } from './routes/Admin';
 import { Settings } from './routes/Settings';
@@ -23,7 +22,8 @@ export function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/check" element={<SpendCheck />} />
-          <Route path="/pending" element={<Pending />} />
+          {/* Pending checks now live on the home screen. */}
+          <Route path="/pending" element={<Navigate to="/" replace />} />
           <Route path="/history" element={<History />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/admin" element={isAdmin ? <Admin /> : <Navigate to="/" replace />} />
@@ -38,7 +38,6 @@ export function App() {
 function TabBar({ isAdmin }: { isAdmin: boolean }) {
   const tabs = [
     { to: '/', label: 'Home', icon: '◎' },
-    { to: '/pending', label: 'Pending', icon: '◔' },
     { to: '/history', label: 'History', icon: '≡' },
     ...(isAdmin ? [{ to: '/admin', label: 'Admin', icon: '⚙' }] : []),
     { to: '/settings', label: 'You', icon: '☺' },
