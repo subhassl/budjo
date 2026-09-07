@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AccountSummary, Card, Category, DecisionResult, LedgerEntry, MeResponse, Remedy, SpendCheck, User,
 } from '@budjo/shared';
-import { api, idemKey, post } from './api';
+import { api, del, idemKey, post } from './api';
 
 export interface AccountsResponse { accounts: AccountSummary[] }
 export interface ReferenceResponse {
@@ -152,8 +152,16 @@ export function useEditLedgerEntry() {
     mutationFn: ({ id, ...body }: {
       id: string; amountCents?: number; accountId?: string;
       categoryId?: string | null; cardId?: string | null; note?: string | null;
-      occurredOn?: string; reason: string;
-    }) => post(`/admin/ledger/${id}/edit`, body),
+      occurredOn?: string; reason?: string; forceCorrection?: boolean;
+    }) => post<{ ok: true; mode: 'direct' | 'correction' }>(`/admin/ledger/${id}/edit`, body),
+    onSuccess: refresh,
+  });
+}
+
+export function useDeleteLedgerEntry() {
+  const refresh = useRefreshMoney();
+  return useMutation({
+    mutationFn: (id: string) => del(`/admin/ledger/${id}`),
     onSuccess: refresh,
   });
 }

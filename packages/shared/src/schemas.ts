@@ -89,6 +89,7 @@ export const updateFamilySchema = z.object({
   timezone: z.string().min(1).max(64).optional(),
   reserveThresholdCents: centsSchema.optional(),
   holdTtlHours: z.number().int().min(1).max(720).optional(),
+  editWindowHours: z.number().int().min(0).max(720).optional(),
 });
 
 export const upsertCategorySchema = z.object({
@@ -121,7 +122,13 @@ export const editLedgerEntrySchema = z.object({
   cardId: idSchema.nullish(),
   note: z.string().max(500).nullish(),
   occurredOn: calendarDateSchema.optional(),
-  reason: z.string().min(1, 'a reason is required').max(500),
+  /**
+   * Required for a correction, optional for an in-place fix inside the window.
+   * Validated against the mode the server actually applies.
+   */
+  reason: z.string().max(500).optional(),
+  /** Force a correction even inside the window, when the change is substantive. */
+  forceCorrection: z.boolean().optional(),
 });
 
 export const voidEntrySchema = z.object({

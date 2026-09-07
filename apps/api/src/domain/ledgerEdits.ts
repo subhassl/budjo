@@ -61,3 +61,41 @@ export function isValidAmountForType(type: LedgerType, amountCents: number): boo
       return false;
   }
 }
+
+export type EditMode = 'direct' | 'correction' | 'blocked';
+
+/**
+ * Within the grace window a fresh entry is simply corrected in place; outside
+ * it, the only route is a void plus a replacement.
+ *
+ * Measured from when the row was created, not the date it carries — backdating
+ * a spend to last month must not put it outside the window, and dating one
+ * today must not reopen it.
+ */
+export function isWithinEditWindow(
+  createdAt: string,
+  editWindowHours: number,
+  now = new Date(),
+): boolean {
+  const created = Date.parse(createdAt);
+  if (Number.isNaN(created)) return false;
+  return now.getTime() - created < editWindowHours * 3_600_000;
+}
+
+export function editWindowClosesAt(createdAt: string, editWindowHours: number): string {
+  return new Date(Date.parse(createdAt) + editWindowHours * 3_600_000).toISOString();
+}
+
+export function editModeFor(entry: {
+  type: LedgerType;
+  createdAt: string;
+  alreadyCorrected: boolean;
+}, opts: { editWindowHours: number; now?: Date }): EditMode {
+  if (!canEditType(entry.type)) return 'blocked';
+  // Once something points at this row, editing it in place would leave the
+  // correction describing a change that no longer matches what it reversed.
+  if (entry.alreadyCorrected) return 'blocked';
+  return isWithinEditWindow(entry.createdAt, opts.editWindowHours, opts.now)
+    ? 'direct'
+    : 'correction';
+}

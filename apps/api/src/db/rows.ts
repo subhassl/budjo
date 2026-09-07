@@ -9,6 +9,7 @@ export interface FamilyRow {
   currency: string;
   reserve_threshold_cents: number;
   hold_ttl_hours: number;
+  edit_window_hours: number;
 }
 
 export interface UserRow {
@@ -93,6 +94,7 @@ export const toFamily = (r: FamilyRow): FamilySettings => ({
   currency: r.currency,
   reserveThresholdCents: r.reserve_threshold_cents,
   holdTtlHours: r.hold_ttl_hours,
+  editWindowHours: r.edit_window_hours,
 });
 
 export const toUser = (r: UserRow): User => ({

@@ -8,7 +8,8 @@ import {
 import type { AppEnv } from '../env';
 import { assertAdmin } from '../domain/access';
 import {
-  canEditType, canVoidType, isValidAmountForType, whyNotEditable,
+  canEditType, canVoidType, editModeFor, editWindowClosesAt, isValidAmountForType,
+  isWithinEditWindow, whyNotEditable,
 } from '../domain/ledgerEdits';
 import { auditInsert, ledgerInsert } from '../services/ledger';
 import { runMaintenance } from '../services/maintenance';
@@ -273,6 +274,7 @@ adminRoutes.patch('/family', async (c) => {
   if (f.timezone !== undefined) { sets.push('timezone = ?'); binds.push(f.timezone); }
   if (f.reserveThresholdCents !== undefined) { sets.push('reserve_threshold_cents = ?'); binds.push(f.reserveThresholdCents); }
   if (f.holdTtlHours !== undefined) { sets.push('hold_ttl_hours = ?'); binds.push(f.holdTtlHours); }
+  if (f.editWindowHours !== undefined) { sets.push('edit_window_hours = ?'); binds.push(f.editWindowHours); }
   if (sets.length === 0) throw badRequest('Nothing to update');
 
   await c.env.DB.batch([
@@ -459,14 +461,14 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
   const entry = await c.env.DB
     .prepare(
       `SELECT id, account_id, type, amount_cents, period, category_id, card_id,
-              spend_check_id, note, occurred_at
+              spend_check_id, note, occurred_at, created_at
          FROM ledger_entries WHERE id = ?`,
     )
     .bind(c.req.param('id'))
     .first<{
       id: string; account_id: string; type: string; amount_cents: number; period: string;
       category_id: string | null; card_id: string | null; spend_check_id: string | null;
-      note: string | null; occurred_at: string;
+      note: string | null; occurred_at: string; created_at: string;
     }>();
   if (!entry) throw notFound('No such ledger entry');
 
@@ -481,6 +483,19 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
 
   const family = c.get('family');
   const actor = c.get('user');
+
+  const mode = input.forceCorrection
+    ? 'correction'
+    : editModeFor(
+        { type, createdAt: entry.created_at, alreadyCorrected: false },
+        { editWindowHours: family.editWindowHours },
+      );
+
+  // A correction is permanent and public in history, so it has to say why.
+  // A fix inside the window is a typo; demanding a reason would be theatre.
+  if (mode === 'correction' && !input.reason?.trim()) {
+    throw badRequest('A reason is required when correcting an older entry');
+  }
 
   const amountCents = input.amountCents ?? entry.amount_cents;
   if (!isValidAmountForType(type, amountCents)) {
@@ -504,8 +519,45 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
     ? occurredAtFor(input.occurredOn, family.timezone)
     : entry.occurred_at;
 
+  const categoryId = input.categoryId === undefined ? entry.category_id : input.categoryId;
+  const cardId = input.cardId === undefined ? entry.card_id : input.cardId;
+  const note = input.note === undefined ? entry.note : input.note;
+
+  const before = {
+    accountId: entry.account_id, amountCents: entry.amount_cents,
+    period: entry.period, occurredAt: entry.occurred_at,
+    categoryId: entry.category_id, cardId: entry.card_id, note: entry.note,
+  };
+  const after = { accountId, amountCents, period, occurredAt, categoryId, cardId, note };
+
+  if (mode === 'direct') {
+    // The window is re-checked in the UPDATE itself, so an entry that ages out
+    // between the read above and this write is not quietly rewritten.
+    const cutoff = new Date(Date.now() - family.editWindowHours * 3_600_000).toISOString();
+    const res = await c.env.DB
+      .prepare(
+        `UPDATE ledger_entries
+            SET account_id = ?, amount_cents = ?, period = ?, category_id = ?,
+                card_id = ?, note = ?, occurred_at = ?
+          WHERE id = ? AND created_at > ?`,
+      )
+      .bind(accountId, amountCents, period, categoryId, cardId, note, occurredAt, entry.id, cutoff)
+      .run();
+
+    if ((res.meta?.changes ?? 0) === 0) {
+      throw conflict('That entry is no longer editable — save it as a correction instead');
+    }
+
+    // Nothing survives in the ledger itself, so the audit log is the only record
+    // that this changed. It is not optional here.
+    await auditInsert(c.env.DB, actor.id, 'ledger.edit.direct',
+      { type: 'ledger_entry', id: entry.id },
+      { before, after, reason: input.reason ?? null }).run();
+
+    return c.json({ ok: true, mode });
+  }
+
   await c.env.DB.batch([
-    // Reverse the original, in its own month.
     ledgerInsert(c.env.DB, {
       accountId: entry.account_id,
       actorUserId: actor.id,
@@ -513,37 +565,70 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
       amountCents: -entry.amount_cents,
       period: entry.period,
       voidsEntryId: entry.id,
-      note: input.reason,
+      note: input.reason!.trim(),
       occurredAt: entry.occurred_at,
       createdBy: actor.id,
     }),
-    // ...and post the corrected version, which may sit in a different month or
-    // even a different account if that is what was wrong.
     ledgerInsert(c.env.DB, {
       accountId,
       actorUserId: actor.id,
       type,
       amountCents,
       period,
-      categoryId: input.categoryId === undefined ? entry.category_id : input.categoryId,
-      cardId: input.cardId === undefined ? entry.card_id : input.cardId,
+      categoryId,
+      cardId,
       spendCheckId: entry.spend_check_id,
-      note: input.note === undefined ? entry.note : input.note,
+      note,
       occurredAt,
       createdBy: actor.id,
     }),
-    auditInsert(c.env.DB, actor.id, 'ledger.edit', { type: 'ledger_entry', id: entry.id }, {
-      from: {
-        accountId: entry.account_id, amountCents: entry.amount_cents,
-        period: entry.period, note: entry.note,
-      },
-      to: { accountId, amountCents, period, note: input.note ?? entry.note },
-      reason: input.reason,
-    }),
+    auditInsert(c.env.DB, actor.id, 'ledger.edit.correction',
+      { type: 'ledger_entry', id: entry.id },
+      { before, after, reason: input.reason }),
   ]);
+
+  return c.json({ ok: true, mode });
+});
+
+/**
+ * Remove an entry outright. Inside the window it is deleted; outside, the
+ * caller must use the correction route so the reversal stays on the record.
+ */
+adminRoutes.delete('/ledger/:id', async (c) => {
+  const entry = await c.env.DB
+    .prepare('SELECT id, account_id, type, amount_cents, period, note, created_at FROM ledger_entries WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<{
+      id: string; account_id: string; type: string; amount_cents: number;
+      period: string; note: string | null; created_at: string;
+    }>();
+  if (!entry) throw notFound('No such ledger entry');
+
+  const type = entry.type as LedgerType;
+  if (!canEditType(type)) throw conflict(whyNotEditable(type));
+
+  const family = c.get('family');
+  if (!isWithinEditWindow(entry.created_at, family.editWindowHours)) {
+    throw conflict('Too old to delete — remove it as a correction instead');
+  }
+
+  const cutoff = new Date(Date.now() - family.editWindowHours * 3_600_000).toISOString();
+  const res = await c.env.DB
+    .prepare('DELETE FROM ledger_entries WHERE id = ? AND created_at > ?')
+    .bind(entry.id, cutoff)
+    .run();
+  if ((res.meta?.changes ?? 0) === 0) {
+    throw conflict('That entry is no longer editable — remove it as a correction instead');
+  }
+
+  await auditInsert(c.env.DB, c.get('user').id, 'ledger.delete',
+    { type: 'ledger_entry', id: entry.id },
+    { accountId: entry.account_id, amountCents: entry.amount_cents,
+      period: entry.period, note: entry.note, closedAt: editWindowClosesAt(entry.created_at, family.editWindowHours) }).run();
 
   return c.json({ ok: true });
 });
+
 
 adminRoutes.get('/audit', async (c) => {
   const { results } = await c.env.DB

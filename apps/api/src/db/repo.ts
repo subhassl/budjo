@@ -10,7 +10,8 @@ import {
 
 export async function getFamily(db: D1Database): Promise<FamilySettings> {
   const row = await db
-    .prepare('SELECT id, name, timezone, currency, reserve_threshold_cents, hold_ttl_hours FROM family LIMIT 1')
+    .prepare(`SELECT id, name, timezone, currency, reserve_threshold_cents, hold_ttl_hours,
+              edit_window_hours FROM family LIMIT 1`)
     .first<FamilyRow>();
   if (!row) throw new Error('Family row missing — has the database been seeded?');
   return toFamily(row);

@@ -132,6 +132,8 @@ export interface FamilySettings {
   currency: string;
   reserveThresholdCents: number;
   holdTtlHours: number;
+  /** Hours after creation during which an entry can be fixed in place. */
+  editWindowHours: number;
 }
 
 export interface MeResponse {

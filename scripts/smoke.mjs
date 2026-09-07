@@ -272,63 +272,107 @@ ok('the entry is filed under the month it happened', entry?.period === lastPerio
 ok('and dated to the day picked', entry?.occurredAt.slice(0, 10) === backdated,
    `occurredAt ${entry?.occurredAt}`);
 
-console.log('\n14. Editing a history entry');
+console.log('\n14. Editing a fresh entry in place');
 const dinner = await call(cookie, '/spends', 'POST',
   { accountId: 'acc_joint', estimatedCents: 6000, categoryId: 'cat_dining', merchant: 'Dinner' });
 ok('logged a spend to edit', dinner.body.check?.status === 'settled');
 
-const jointBeforeEdit = (await call(cookie, '/accounts')).body.accounts
-  .find((a) => a.accountId === 'acc_joint');
-const dinnerEntry = (await call(cookie, '/ledger?account=acc_joint')).body.entries
-  .find((e) => e.note === 'Dinner');
+const beforeEdit = (await call(cookie, '/accounts')).body.accounts.find((a) => a.accountId === 'acc_joint');
+const entriesBefore = (await call(cookie, '/ledger?account=acc_joint')).body.entries;
+const dinnerEntry = entriesBefore.find((e) => e.note === 'Dinner');
 
-const edited = await call(cookie, `/admin/ledger/${dinnerEntry.id}/edit`, 'POST',
-  { amountCents: -7500, note: 'Dinner (with tip)', reason: 'forgot the tip' });
-ok('edit accepted', edited.status === 200, JSON.stringify(edited.body));
+const direct = await call(cookie, `/admin/ledger/${dinnerEntry.id}/edit`, 'POST',
+  { amountCents: -7500, note: 'Dinner (with tip)' });
+ok('a fresh entry edits in place', direct.body.mode === 'direct', JSON.stringify(direct.body));
+ok('no reason demanded for a typo fix', direct.status === 200);
 
-const jointAfterEdit = (await call(cookie, '/accounts')).body.accounts
-  .find((a) => a.accountId === 'acc_joint');
+const entriesAfter = (await call(cookie, '/ledger?account=acc_joint')).body.entries;
+ok('history gains no extra rows', entriesAfter.length === entriesBefore.length,
+   `${entriesBefore.length} -> ${entriesAfter.length}`);
+ok('no correction row is created', !entriesAfter.some((e) => e.voidsEntryId === dinnerEntry.id));
+const sameRow = entriesAfter.find((e) => e.id === dinnerEntry.id);
+ok('the original row now carries the new values',
+   sameRow?.amountCents === -7500 && sameRow?.note === 'Dinner (with tip)',
+   JSON.stringify({ amount: sameRow?.amountCents, note: sameRow?.note }));
+
+const afterEdit = (await call(cookie, '/accounts')).body.accounts.find((a) => a.accountId === 'acc_joint');
 ok('balance moves by the difference only',
-   jointBeforeEdit.balanceCents - jointAfterEdit.balanceCents === 1500,
-   `delta ${jointBeforeEdit.balanceCents - jointAfterEdit.balanceCents}`);
-// This is the bug the feature would otherwise have had: a correction that does
-// not reach the month's Spent figure makes the edit look like it did nothing.
-ok('the month’s spent total reflects the correction',
-   jointAfterEdit.spentCents - jointBeforeEdit.spentCents === 1500,
-   `spent ${jointBeforeEdit.spentCents} -> ${jointAfterEdit.spentCents}`);
+   beforeEdit.balanceCents - afterEdit.balanceCents === 1500,
+   `delta ${beforeEdit.balanceCents - afterEdit.balanceCents}`);
+ok('the month’s spent total follows',
+   afterEdit.spentCents - beforeEdit.spentCents === 1500);
 
-const afterEntries = (await call(cookie, '/ledger?account=acc_joint')).body.entries;
-ok('the original is still there', afterEntries.some((e) => e.id === dinnerEntry.id));
+const audit = (await call(cookie, '/admin/audit')).body.entries;
+ok('the in-place edit is still recorded in the audit log',
+   audit.some((a) => a.action === 'ledger.edit.direct'));
+
+console.log('\n15. Deleting a fresh entry');
+const throwaway = await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_joint', estimatedCents: 300, merchant: 'Mistake' });
+const throwawayEntry = (await call(cookie, '/ledger?account=acc_joint')).body.entries
+  .find((e) => e.note === 'Mistake');
+const del = await call(cookie, `/admin/ledger/${throwawayEntry.id}`, 'DELETE');
+ok('a fresh entry deletes outright', del.status === 200);
+ok('and leaves nothing behind',
+   !(await call(cookie, '/ledger?account=acc_joint')).body.entries.some((e) => e.note === 'Mistake'));
+
+console.log('\n16. Once the window closes, only corrections');
+await call(cookie, '/admin/family', 'PATCH', { editWindowHours: 0 });
+
+const oldEntry = (await call(cookie, '/ledger?account=acc_joint')).body.entries
+  .find((e) => e.note === 'Dinner (with tip)');
+const noReason = await call(cookie, `/admin/ledger/${oldEntry.id}/edit`, 'POST', { amountCents: -8000 });
+ok('a reason is now required', noReason.status === 400, `status ${noReason.status}`);
+
+const cantDelete = await call(cookie, `/admin/ledger/${oldEntry.id}`, 'DELETE');
+ok('and it can no longer be deleted outright', cantDelete.status === 409, `status ${cantDelete.status}`);
+
+const corrected = await call(cookie, `/admin/ledger/${oldEntry.id}/edit`, 'POST',
+  { amountCents: -8000, reason: 'receipt said 80' });
+ok('the correction path takes over', corrected.body.mode === 'correction', JSON.stringify(corrected.body));
+
+const afterCorrection = (await call(cookie, '/ledger?account=acc_joint')).body.entries;
+ok('the original survives', afterCorrection.some((e) => e.id === oldEntry.id));
 ok('a correction points at it',
-   afterEntries.some((e) => e.type === 'void' && e.voidsEntryId === dinnerEntry.id));
-ok('and the replacement carries the new values',
-   afterEntries.some((e) => e.note === 'Dinner (with tip)' && e.amountCents === -7500));
-ok('editing the same entry twice is refused',
-   (await call(cookie, `/admin/ledger/${dinnerEntry.id}/edit`, 'POST',
-     { amountCents: -100, reason: 'again' })).status === 409);
+   afterCorrection.some((e) => e.type === 'void' && e.voidsEntryId === oldEntry.id));
+ok('and a replacement carries the new amount',
+   afterCorrection.some((e) => e.amountCents === -8000 && e.type === 'spend'));
+ok('correcting the same entry twice is refused',
+   (await call(cookie, `/admin/ledger/${oldEntry.id}/edit`, 'POST',
+     { amountCents: -1, reason: 'again' })).status === 409);
 
-const replacement = afterEntries.find((e) => e.note === 'Dinner (with tip)');
+await call(cookie, '/admin/family', 'PATCH', { editWindowHours: 48 });
+
+console.log('\n17. Guards that hold either way');
+const replacement = (await call(cookie, '/ledger?account=acc_joint')).body.entries
+  .find((e) => e.amountCents === -8000 && e.type === 'spend');
 ok('a spend cannot be flipped into a credit',
    (await call(cookie, `/admin/ledger/${replacement.id}/edit`, 'POST',
-     { amountCents: 7500, reason: 'sneaky' })).status === 400);
+     { amountCents: 8000, reason: 'sneaky' })).status === 400);
+ok('forcing a correction inside the window works',
+   (await call(cookie, `/admin/ledger/${replacement.id}/edit`, 'POST',
+     { note: 'kept a trail', reason: 'on purpose', forceCorrection: true })).body.mode === 'correction');
 
-const transferLeg = (await call(cookie, '/ledger')).body.entries
-  .find((e) => e.type === 'transfer_out');
+const allocEntry = (await call(cookie, '/ledger?account=acc_joint')).body.entries
+  .find((e) => e.type === 'allocation');
+ok('an allocation cannot be hand-edited even when fresh',
+   (await call(cookie, `/admin/ledger/${allocEntry.id}/edit`, 'POST',
+     { amountCents: 1, reason: 'no' })).status === 409);
+ok('nor deleted outright',
+   (await call(cookie, `/admin/ledger/${allocEntry.id}`, 'DELETE')).status === 409);
+
+const transferLeg = (await call(cookie, '/ledger')).body.entries.find((e) => e.type === 'transfer_out');
 if (transferLeg) {
   ok('a transfer leg cannot be edited',
      (await call(cookie, `/admin/ledger/${transferLeg.id}/edit`, 'POST',
        { amountCents: -1, reason: 'no' })).status === 409);
 }
 
-const allocEntry = (await call(cookie, '/ledger?account=acc_joint')).body.entries
-  .find((e) => e.type === 'allocation');
-ok('an allocation cannot be hand-edited',
-   (await call(cookie, `/admin/ledger/${allocEntry.id}/edit`, 'POST',
-     { amountCents: 1, reason: 'no' })).status === 409);
-
 ok('a member cannot edit anything',
    (await call(kidCookie, `/admin/ledger/${allocEntry.id}/edit`, 'POST',
      { amountCents: 1, reason: 'no' })).status === 403);
+ok('nor delete anything',
+   (await call(kidCookie, `/admin/ledger/${allocEntry.id}`, 'DELETE')).status === 403);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

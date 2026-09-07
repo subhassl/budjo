@@ -371,6 +371,7 @@ function FamilySettings({ data }: { data: AdminOverview }) {
   const [reserve, setReserve] = useState((data.family.reserveThresholdCents / 100).toFixed(2));
   const [hold, setHold] = useState(String(data.family.holdTtlHours));
   const [tz, setTz] = useState(data.family.timezone);
+  const [editWindow, setEditWindow] = useState(String(data.family.editWindowHours));
   const save = useAdminMutation((body: unknown) => patch('/admin/family', body));
 
   return (
@@ -381,6 +382,11 @@ function FamilySettings({ data }: { data: AdminOverview }) {
       <Field label="Hold expires after (hours)">
         <TextInput value={hold} inputMode="numeric" onChange={(e) => setHold(e.target.value)} />
       </Field>
+      <Field label="Edit entries in place for (hours)"
+             hint="After this, changes to history are kept as corrections. 0 means always.">
+        <TextInput value={editWindow} inputMode="numeric"
+                   onChange={(e) => setEditWindow(e.target.value)} />
+      </Field>
       <Field label="Timezone" hint="Decides when the 1st of the month happens.">
         <TextInput value={tz} onChange={(e) => setTz(e.target.value)} />
       </Field>
@@ -390,6 +396,7 @@ function FamilySettings({ data }: { data: AdminOverview }) {
           save.mutate({
             reserveThresholdCents: parseDollarsToCents(reserve) ?? 0,
             holdTtlHours: Number(hold) || 48,
+            editWindowHours: Number(editWindow) || 0,
             timezone: tz.trim(),
           })
         }

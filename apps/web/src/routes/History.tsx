@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { AccountSummary, LedgerEntry, LedgerType } from '@budjo/shared';
 import { dateOf, formatCents, parseDollarsToCents } from '@budjo/shared';
 import {
-  useAccounts, useEditLedgerEntry, useLedger, useMe, useReference, useVoidLedgerEntry,
+  useAccounts, useDeleteLedgerEntry, useEditLedgerEntry, useLedger, useMe, useReference,
+  useVoidLedgerEntry,
 } from '../lib/hooks';
 import { Button, Card, Empty, ErrorNote, Field, Select, Spinner, TextInput } from '../components/ui';
 
@@ -131,6 +132,7 @@ export function History() {
           categories={reference.data?.categories ?? []}
           cards={reference.data?.cards ?? []}
           timezone={me.data?.family.timezone ?? 'UTC'}
+          editWindowHours={me.data?.family.editWindowHours ?? 48}
           alreadyReversed={reversed.has(editing.id)}
           onClose={() => setEditing(null)}
         />
@@ -140,18 +142,20 @@ export function History() {
 }
 
 function EditSheet({
-  entry, accounts, categories, cards, timezone, alreadyReversed, onClose,
+  entry, accounts, categories, cards, timezone, editWindowHours, alreadyReversed, onClose,
 }: {
   entry: LedgerEntry;
   accounts: AccountSummary[];
   categories: { id: string; name: string; icon: string }[];
   cards: { id: string; name: string }[];
   timezone: string;
+  editWindowHours: number;
   alreadyReversed: boolean;
   onClose: () => void;
 }) {
   const edit = useEditLedgerEntry();
   const voidEntry = useVoidLedgerEntry();
+  const deleteEntry = useDeleteLedgerEntry();
 
   const negative = entry.amountCents < 0;
   const [amount, setAmount] = useState((Math.abs(entry.amountCents) / 100).toFixed(2));
@@ -161,11 +165,21 @@ function EditSheet({
   const [note, setNote] = useState(entry.note ?? '');
   const [occurredOn, setOccurredOn] = useState(entry.occurredAt.slice(0, 10));
   const [reason, setReason] = useState('');
+  const [forceCorrection, setForceCorrection] = useState(false);
 
   const today = dateOf(new Date(), timezone);
   const editable = EDITABLE.includes(entry.type);
   const cents = parseDollarsToCents(amount);
-  const canSave = editable && !alreadyReversed && cents !== null && cents > 0 && reason.trim().length > 0;
+
+  // Measured from when the row was created, not the date it carries, so
+  // backdating a spend never pushes it out of its own window.
+  const msLeft = Date.parse(entry.createdAt) + editWindowHours * 3_600_000 - Date.now();
+  const withinWindow = msLeft > 0;
+  const asCorrection = forceCorrection || !withinWindow;
+  const hoursLeft = Math.max(0, Math.round(msLeft / 3_600_000));
+
+  const canSave = editable && !alreadyReversed && cents !== null && cents > 0
+    && (!asCorrection || reason.trim().length > 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/50" onClick={onClose}>
@@ -175,7 +189,11 @@ function EditSheet({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">Correct this entry</h2>
+          <h2 className="text-base font-semibold">
+            {editable && !alreadyReversed && withinWindow && !forceCorrection
+              ? 'Edit this entry'
+              : 'Correct this entry'}
+          </h2>
           <button onClick={onClose} className="muted text-sm">Close</button>
         </div>
 
@@ -226,23 +244,43 @@ function EditSheet({
             <Field label="Description">
               <TextInput value={note} onChange={(e) => setNote(e.target.value)} />
             </Field>
-            <Field label="Why?" hint="Required — it stays in history beside the original.">
+            <Field
+              label={asCorrection ? 'Why?' : 'Why? (optional)'}
+              hint={asCorrection
+                ? 'Required — it stays in history beside the original.'
+                : 'Kept in the admin log, not shown in history.'}
+            >
               <TextInput value={reason} onChange={(e) => setReason(e.target.value)}
                          placeholder="Wrong amount" />
             </Field>
 
-            <ErrorNote error={edit.error ?? voidEntry.error} />
+            {withinWindow ? (
+              <label className="flex items-start gap-2 text-xs">
+                <input type="checkbox" checked={forceCorrection} className="mt-0.5"
+                       onChange={(e) => setForceCorrection(e.target.checked)} />
+                <span className="muted">
+                  Leave a correction in history instead of editing in place.
+                  Worth it when the change is more than a typo.
+                </span>
+              </label>
+            ) : null}
+
+            <ErrorNote error={edit.error ?? voidEntry.error ?? deleteEntry.error} />
 
             <div className="flex gap-2">
               <Button
                 variant="danger"
-                disabled={!reason.trim() || voidEntry.isPending}
+                disabled={(asCorrection && !reason.trim()) || voidEntry.isPending || deleteEntry.isPending}
                 onClick={async () => {
-                  await voidEntry.mutateAsync({ id: entry.id, reason: reason.trim() });
+                  if (asCorrection) {
+                    await voidEntry.mutateAsync({ id: entry.id, reason: reason.trim() });
+                  } else {
+                    await deleteEntry.mutateAsync(entry.id);
+                  }
                   onClose();
                 }}
               >
-                Remove
+                {asCorrection ? 'Remove' : 'Delete'}
               </Button>
               <Button
                 className="flex-1"
@@ -256,16 +294,19 @@ function EditSheet({
                     cardId: cardId || null,
                     note: note.trim() || null,
                     occurredOn,
-                    reason: reason.trim(),
+                    ...(reason.trim() ? { reason: reason.trim() } : {}),
+                    ...(forceCorrection ? { forceCorrection: true } : {}),
                   });
                   onClose();
                 }}
               >
-                Save correction
+                {asCorrection ? 'Save correction' : 'Save changes'}
               </Button>
             </div>
             <p className="muted text-xs">
-              Nothing is overwritten: the original stays, with the correction recorded beside it.
+              {asCorrection
+                ? 'Nothing is overwritten: the original stays, with the correction recorded beside it.'
+                : `Editable in place for another ${hoursLeft}h. After that, changes are kept as corrections.`}
             </p>
           </div>
         )}
