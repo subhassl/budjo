@@ -1,0 +1,3 @@
+# Copy to .dev.vars for local development (wrangler loads it automatically).
+# Generate with: openssl rand -base64 48
+SESSION_SECRET="replace-me-with-a-long-random-string"

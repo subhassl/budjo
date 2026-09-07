@@ -1,0 +1,31 @@
+{
+  "name": "budjo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @budjo/web",
+    "dev:api": "wrangler dev",
+    "build": "npm run build --workspace @budjo/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p apps/api/tsconfig.json && tsc -p apps/web/tsconfig.json",
+    "db:migrate:local": "wrangler d1 migrations apply budjo --local",
+    "db:migrate": "wrangler d1 migrations apply budjo --remote",
+    "seed:local": "node scripts/seed.mjs --local",
+    "seed": "node scripts/seed.mjs --remote",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.99.0",
+    "@cloudflare/workers-types": "^4.20241218.0"
+  }
+}

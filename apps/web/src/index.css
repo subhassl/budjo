@@ -1,0 +1,50 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink: #0b0d10;
+  --color-paper: #f7f7f5;
+  --font-sans: ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: light dark;
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --border: #e5e4e0;
+  --text: #14161a;
+  --muted: #6b7280;
+  --accent: #0f9d63;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0d10;
+    --surface: #14171c;
+    --border: #24282f;
+    --text: #e9eaec;
+    --muted: #9099a5;
+    --accent: #14b87a;
+  }
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* Respect the notch and the home indicator when installed. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+/* Numbers should never reflow as they change — tabular figures keep the big
+   balance from jittering while you type an amount. */
+.tnum { font-variant-numeric: tabular-nums; }
+
+.surface { background: var(--surface); border: 1px solid var(--border); }
+.muted { color: var(--muted); }
+
+button, input, select { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }

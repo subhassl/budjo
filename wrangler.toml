@@ -1,0 +1,25 @@
+name = "budjo"
+main = "apps/api/src/index.ts"
+compatibility_date = "2024-12-05"
+compatibility_flags = ["nodejs_compat"]
+
+# The Worker serves the built PWA as static assets and handles /api itself.
+# not_found_handling = "none" so unknown paths fall through to the Worker,
+# which returns the SPA shell for client-side routes and JSON 404s for /api.
+[assets]
+directory = "./apps/web/dist"
+binding = "ASSETS"
+not_found_handling = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "budjo"
+database_id = "00000000-0000-0000-0000-000000000000"  # replace after `wrangler d1 create budjo`
+migrations_dir = "migrations"
+
+# Daily at 06:00 UTC: allocate the month, repay advances, expire stale holds.
+[triggers]
+crons = ["0 6 * * *"]
+
+[vars]
+APP_NAME = "Budjo"

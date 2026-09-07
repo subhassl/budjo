@@ -1,0 +1,14 @@
+{
+  "name": "@budjo/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@budjo/shared": "*",
+    "@simplewebauthn/server": "^13.1.1",
+    "hono": "^4.6.14",
+    "jose": "^5.9.6",
+    "zod": "^3.24.1"
+  }
+}
