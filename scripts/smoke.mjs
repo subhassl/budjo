@@ -482,5 +482,38 @@ const bad = await (await fetch(`${BASE}/auth/passkey/register/options`, {
 ok('a wrong code says only that it is not valid',
    bad.error === 'That invite code is not valid', JSON.stringify(bad));
 
+console.log('\n22. Backups');
+const listedBefore = await call(cookie, '/admin/backups');
+ok('backups report as enabled when a bucket is bound', listedBefore.body.enabled === true,
+   JSON.stringify(listedBefore.body).slice(0, 100));
+
+const snap = await call(cookie, '/admin/backup', 'POST');
+ok('a snapshot is written', snap.status === 200 && typeof snap.body.key === 'string',
+   JSON.stringify(snap.body).slice(0, 140));
+ok('it contains every row in the database', snap.body.rows > 0, `rows ${snap.body.rows}`);
+
+const listedAfter = await call(cookie, '/admin/backups');
+ok('and it shows up in the listing',
+   listedAfter.body.snapshots.some((sn) => sn.key === snap.body.key));
+
+ok('a member cannot take or read backups',
+   (await call(kidCookie, '/admin/backup', 'POST')).status === 403
+   && (await call(kidCookie, '/admin/backups')).status === 403);
+
+// A snapshot that omitted credentials would restore into an app neither of us
+// could sign in to, so prove that table is actually captured rather than
+// inferring it from the byte count.
+sql(`INSERT INTO credentials (id, user_id, credential_id, public_key, counter, created_at)
+     VALUES ('cred_probe', 'usr_one', 'probe-cred-id', 'probe-key', 0, '${new Date().toISOString()}')`);
+const withCred = await call(cookie, '/admin/backup', 'POST');
+ok('passkey credentials are included in the snapshot',
+   withCred.body.rows === snap.body.rows + 1,
+   `rows ${snap.body.rows} -> ${withCred.body.rows}`);
+sql(`DELETE FROM credentials WHERE id = 'cred_probe'`);
+
+const afterDelete = await call(cookie, '/admin/backup', 'POST');
+ok('and the snapshot tracks the database as it changes',
+   afterDelete.body.rows === snap.body.rows, `rows ${afterDelete.body.rows}`);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

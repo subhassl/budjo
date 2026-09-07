@@ -629,12 +629,84 @@ function Reference({ data }: { data: AdminOverview }) {
   );
 }
 
+interface Snapshot { key: string; size: number; uploadedAt: string }
+
 function DataTools() {
   const [audit, setAudit] = useState<Record<string, unknown>[] | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[] | null>(null);
+  const [backupsOn, setBackupsOn] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  const loadSnapshots = async () => {
+    const res = await api<{ enabled: boolean; snapshots: Snapshot[] }>('/admin/backups');
+    setBackupsOn(res.enabled);
+    setSnapshots(res.snapshots);
+  };
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="rounded-xl border border-[var(--border)] p-3">
+        <h3 className="text-sm font-medium">Backups</h3>
+        <p className="muted mt-1 text-xs">
+          Every table is snapshotted to R2 each Sunday, keeping 12 weeks. This is
+          the only copy of the ledger outside the live database.
+        </p>
+        <div className="mt-3 flex gap-2">
+          <Button
+            variant="secondary"
+            className="flex-1 px-3 py-2 text-xs"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                const res = await post<{ key: string; rows: number; bytes: number; pruned: number }>(
+                  '/admin/backup',
+                );
+                setResult(
+                  `Saved ${res.key} — ${res.rows} rows, ${(res.bytes / 1024).toFixed(1)} KB` +
+                    (res.pruned ? `, ${res.pruned} old snapshot(s) removed` : ''),
+                );
+                await loadSnapshots();
+              } catch (err) {
+                setError(err);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? 'Backing up…' : 'Back up now'}
+          </Button>
+          <Button variant="secondary" className="flex-1 px-3 py-2 text-xs"
+                  onClick={() => void loadSnapshots()}>
+            Show snapshots
+          </Button>
+        </div>
+
+        <ErrorNote error={error} />
+
+        {backupsOn === false ? (
+          <p className="muted mt-2 text-xs">Not switched on: no R2 bucket is bound.</p>
+        ) : null}
+
+        {snapshots ? (
+          snapshots.length === 0 ? (
+            <p className="muted mt-2 text-xs">No snapshots yet.</p>
+          ) : (
+            <div className="mt-2 max-h-40 overflow-y-auto text-xs">
+              {snapshots.map((snap) => (
+                <div key={snap.key} className="flex justify-between border-b border-[var(--border)] py-1.5">
+                  <span>{snap.key.replace('snapshots/', '').replace('.json', '')}</span>
+                  <span className="muted tnum">{(snap.size / 1024).toFixed(1)} KB</span>
+                </div>
+              ))}
+            </div>
+          )
+        ) : null}
+      </div>
+
       <a href="/api/admin/export?format=csv" download>
         <Button variant="secondary" className="w-full">Export ledger as CSV</Button>
       </a>
