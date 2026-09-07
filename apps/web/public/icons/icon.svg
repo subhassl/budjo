@@ -1,4 +1,117 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="112" fill="#14b87a"/>
-  <path d="M168 128h108c50 0 84 26 84 68 0 26-13 45-36 55 30 9 47 31 47 62 0 46-36 75-93 75H168zm62 51v57h42c22 0 35-11 35-29s-13-28-35-28zm0 105v65h48c25 0 39-12 39-33s-14-32-39-32z" fill="#0b0d10"/>
+  <defs>
+    <!-- Rich emerald gradient background -->
+    <linearGradient id="bgBudjo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14b87a"/>
+      <stop offset="100%" stop-color="#098553"/>
+    </linearGradient>
+
+    <!-- Warm golden coin gradient -->
+    <linearGradient id="goldCoin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="45%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <linearGradient id="goldInner" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#fef08a"/>
+    </linearGradient>
+
+    <!-- Duck yellow body gradient -->
+    <linearGradient id="duckBody" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fffbeb"/>
+      <stop offset="15%" stop-color="#fef08a"/>
+      <stop offset="60%" stop-color="#facc15"/>
+      <stop offset="100%" stop-color="#eab308"/>
+    </linearGradient>
+
+    <!-- Wing gradient -->
+    <linearGradient id="duckWing" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="60%" stop-color="#facc15"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+
+    <!-- Beak gradient -->
+    <linearGradient id="duckBill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#ea580c"/>
+    </linearGradient>
+
+    <!-- Soft drop shadows -->
+    <filter id="duckShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#044d31" flood-opacity="0.38"/>
+    </filter>
+    <filter id="coinGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#78350f" flood-opacity="0.32"/>
+    </filter>
+    <filter id="wingShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#78350f" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle App Icon Base -->
+  <rect width="512" height="512" rx="116" fill="url(#bgBudjo)"/>
+
+  <!-- Duck Mascot with soft shadow -->
+  <g filter="url(#duckShadow)">
+    <!-- Cute feather tuft/curl on top of head -->
+    <path d="M256 74 C242 96 238 120 244 136 C256 126 268 126 280 138 C278 114 270 90 256 74 Z" fill="#facc15"/>
+    <path d="M260 88 C268 76 282 76 286 90 C280 102 274 112 268 120 C264 108 262 96 260 88 Z" fill="#fef08a"/>
+
+    <!-- Main Duck Body & Head (Plump, adorable silhouette) -->
+    <path d="M148 242 C148 142 194 106 256 106 C318 106 364 142 364 242 C364 340 328 382 256 382 C184 382 148 340 148 242 Z" fill="url(#duckBody)"/>
+
+    <!-- Rosy Cheek Blush -->
+    <ellipse cx="182" cy="274" rx="20" ry="13" fill="#fb7185" opacity="0.45"/>
+    <ellipse cx="330" cy="274" rx="20" ry="13" fill="#fb7185" opacity="0.45"/>
+
+    <!-- Big Cheerful Eyes -->
+    <circle cx="204" cy="220" r="23" fill="#0b0d10"/>
+    <circle cx="212" cy="213" r="8.5" fill="#ffffff"/>
+    <circle cx="199" cy="228" r="3.5" fill="#ffffff"/>
+
+    <circle cx="308" cy="220" r="23" fill="#0b0d10"/>
+    <circle cx="316" cy="213" r="8.5" fill="#ffffff"/>
+    <circle cx="303" cy="228" r="3.5" fill="#ffffff"/>
+
+    <!-- Adorable Duck Bill (Rounded orange beak) -->
+    <!-- Lower bill shadow/depth -->
+    <path d="M214 272 C228 298 284 298 298 272 C286 288 226 288 214 272 Z" fill="#c2410c" opacity="0.6"/>
+    
+    <!-- Main upper bill -->
+    <path d="M204 254 C218 244 238 240 256 242 C274 240 294 244 308 254 C315 278 296 300 256 300 C216 300 197 278 204 254 Z" fill="url(#duckBill)"/>
+    
+    <!-- Bill top shine highlight -->
+    <path d="M222 254 C234 248 278 248 290 254 C278 264 234 264 222 254 Z" fill="#fed7aa" opacity="0.7"/>
+
+    <!-- Nostril dots -->
+    <ellipse cx="247" cy="254" rx="2.5" ry="3.5" fill="#c2410c"/>
+    <ellipse cx="265" cy="254" rx="2.5" ry="3.5" fill="#c2410c"/>
+  </g>
+
+  <!-- Big Shiny Golden Coin held in front -->
+  <g filter="url(#coinGlow)">
+    <!-- Outer Rim -->
+    <circle cx="256" cy="384" r="76" fill="url(#goldCoin)"/>
+    <circle cx="256" cy="386" r="70" fill="none" stroke="#b45309" stroke-width="2" opacity="0.4"/>
+    <!-- Inner Coin Face -->
+    <circle cx="256" cy="384" r="66" fill="url(#goldInner)"/>
+    <circle cx="256" cy="384" r="60" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="4 4" opacity="0.6"/>
+    <!-- Bold Embossed Dollar Sign -->
+    <text x="256" y="407" font-family="-apple-system, system-ui, sans-serif" font-weight="900" font-size="58" fill="#78350f" text-anchor="middle">$</text>
+  </g>
+
+  <!-- Duck Wings hugging the coin with subtle shadow -->
+  <g filter="url(#wingShadow)">
+    <!-- Left Wing -->
+    <path d="M152 334 C168 376 210 382 228 365 C218 344 192 330 152 334 Z" fill="url(#duckWing)"/>
+    <!-- Right Wing -->
+    <path d="M360 334 C344 376 302 382 284 365 C294 344 320 330 360 334 Z" fill="url(#duckWing)"/>
+  </g>
+
+  <!-- Little Sparkles -->
+  <path d="M394 130 Q394 148 412 148 Q394 148 394 166 Q394 148 376 148 Q394 148 394 130 Z" fill="#fef08a"/>
+  <circle cx="418" cy="124" r="4" fill="#ffffff"/>
+  <path d="M116 306 Q116 316 126 316 Q116 316 116 326 Q116 316 106 316 Q116 316 116 306 Z" fill="#fef08a" opacity="0.8"/>
 </svg>
