@@ -1,11 +1,15 @@
 import { Hono } from 'hono';
 import {
-  adjustmentSchema, createInviteSchema, createMemberSchema, periodOf,
-  setAccountAccessSchema, setAllocationSchema, updateAccountSchema, updateFamilySchema,
-  updateUserSchema, upsertCardSchema, upsertCategorySchema, voidEntrySchema,
+  adjustmentSchema, createInviteSchema, createMemberSchema, dateOf, editLedgerEntrySchema,
+  isCalendarDate, occurredAtFor, periodFromDate, periodOf, setAccountAccessSchema,
+  setAllocationSchema, updateAccountSchema, updateFamilySchema, updateUserSchema,
+  upsertCardSchema, upsertCategorySchema, voidEntrySchema, type LedgerType,
 } from '@budjo/shared';
 import type { AppEnv } from '../env';
 import { assertAdmin } from '../domain/access';
+import {
+  canEditType, canVoidType, isValidAmountForType, whyNotEditable,
+} from '../domain/ledgerEdits';
 import { auditInsert, ledgerInsert } from '../services/ledger';
 import { runMaintenance } from '../services/maintenance';
 import { listAccountAccess, listAccounts, listCards, listCategories, listUsers } from '../db/repo';
@@ -414,6 +418,10 @@ adminRoutes.post('/void', async (c) => {
     .first<{ id: string }>();
   if (existing) throw conflict('That entry has already been voided');
 
+  if (!canVoidType(entry.type as LedgerType)) {
+    throw conflict(whyNotEditable(entry.type as LedgerType));
+  }
+
   const actor = c.get('user');
   await c.env.DB.batch([
     ledgerInsert(c.env.DB, {
@@ -421,13 +429,119 @@ adminRoutes.post('/void', async (c) => {
       actorUserId: actor.id,
       type: 'void',
       amountCents: -entry.amount_cents,
-      period: periodOf(new Date(), c.get('family').timezone),
+      // The reversal belongs to the month it reverses. Putting it in today's
+      // month would leave that month still reporting the spend and this one
+      // reporting a phantom credit.
+      period: entry.period,
       voidsEntryId: entry.id,
       note: parsed.data.reason,
       createdBy: actor.id,
     }),
     auditInsert(c.env.DB, actor.id, 'void', { type: 'ledger_entry', id: entry.id }, parsed.data),
   ]);
+  return c.json({ ok: true });
+});
+
+/**
+ * Correct a history entry.
+ *
+ * The ledger is append-only, so this is a void of the original plus a fresh
+ * entry carrying the corrected values — both in one batch, so history can never
+ * show a reversal without its replacement. The UI presents it as an edit; the
+ * data keeps the trail, which is what makes "why is my balance this number?"
+ * answerable a year later.
+ */
+adminRoutes.post('/ledger/:id/edit', async (c) => {
+  const parsed = editLedgerEntrySchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) throw badRequest('Invalid request', parsed.error.flatten());
+  const input = parsed.data;
+
+  const entry = await c.env.DB
+    .prepare(
+      `SELECT id, account_id, type, amount_cents, period, category_id, card_id,
+              spend_check_id, note, occurred_at
+         FROM ledger_entries WHERE id = ?`,
+    )
+    .bind(c.req.param('id'))
+    .first<{
+      id: string; account_id: string; type: string; amount_cents: number; period: string;
+      category_id: string | null; card_id: string | null; spend_check_id: string | null;
+      note: string | null; occurred_at: string;
+    }>();
+  if (!entry) throw notFound('No such ledger entry');
+
+  const type = entry.type as LedgerType;
+  if (!canEditType(type)) throw conflict(whyNotEditable(type));
+
+  const already = await c.env.DB
+    .prepare(`SELECT id FROM ledger_entries WHERE voids_entry_id = ? AND type = 'void'`)
+    .bind(entry.id)
+    .first<{ id: string }>();
+  if (already) throw conflict('That entry has already been corrected');
+
+  const family = c.get('family');
+  const actor = c.get('user');
+
+  const amountCents = input.amountCents ?? entry.amount_cents;
+  if (!isValidAmountForType(type, amountCents)) {
+    throw badRequest(
+      type === 'spend' ? 'A spend has to stay a spend' : 'That amount is not valid for this entry',
+    );
+  }
+
+  if (input.occurredOn) {
+    if (!isCalendarDate(input.occurredOn)) throw badRequest('That is not a real date');
+    if (input.occurredOn > dateOf(new Date(), family.timezone)) {
+      throw badRequest('You cannot date an entry in the future');
+    }
+  }
+
+  const accountId = input.accountId ?? entry.account_id;
+  if (!c.get('accounts').some((a) => a.id === accountId)) throw badRequest('No such account');
+
+  const period = input.occurredOn ? periodFromDate(input.occurredOn) : entry.period;
+  const occurredAt = input.occurredOn
+    ? occurredAtFor(input.occurredOn, family.timezone)
+    : entry.occurred_at;
+
+  await c.env.DB.batch([
+    // Reverse the original, in its own month.
+    ledgerInsert(c.env.DB, {
+      accountId: entry.account_id,
+      actorUserId: actor.id,
+      type: 'void',
+      amountCents: -entry.amount_cents,
+      period: entry.period,
+      voidsEntryId: entry.id,
+      note: input.reason,
+      occurredAt: entry.occurred_at,
+      createdBy: actor.id,
+    }),
+    // ...and post the corrected version, which may sit in a different month or
+    // even a different account if that is what was wrong.
+    ledgerInsert(c.env.DB, {
+      accountId,
+      actorUserId: actor.id,
+      type,
+      amountCents,
+      period,
+      categoryId: input.categoryId === undefined ? entry.category_id : input.categoryId,
+      cardId: input.cardId === undefined ? entry.card_id : input.cardId,
+      spendCheckId: entry.spend_check_id,
+      note: input.note === undefined ? entry.note : input.note,
+      occurredAt,
+      createdBy: actor.id,
+    }),
+    auditInsert(c.env.DB, actor.id, 'ledger.edit', { type: 'ledger_entry', id: entry.id }, {
+      from: {
+        accountId: entry.account_id, amountCents: entry.amount_cents,
+        period: entry.period, note: entry.note,
+      },
+      to: { accountId, amountCents, period, note: input.note ?? entry.note },
+      reason: input.reason,
+    }),
+  ]);
+
   return c.json({ ok: true });
 });
 

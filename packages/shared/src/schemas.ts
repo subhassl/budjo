@@ -113,6 +113,17 @@ export const adjustmentSchema = z.object({
   note: z.string().min(1, 'a reason is required').max(500),
 });
 
+export const editLedgerEntrySchema = z.object({
+  /** Signed, matching the entry's type: a spend stays negative. */
+  amountCents: signedCentsSchema.optional(),
+  accountId: idSchema.optional(),
+  categoryId: idSchema.nullish(),
+  cardId: idSchema.nullish(),
+  note: z.string().max(500).nullish(),
+  occurredOn: calendarDateSchema.optional(),
+  reason: z.string().min(1, 'a reason is required').max(500),
+});
+
 export const voidEntrySchema = z.object({
   ledgerEntryId: idSchema,
   reason: z.string().min(1, 'a reason is required').max(500),

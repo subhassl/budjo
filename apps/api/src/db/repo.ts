@@ -122,7 +122,15 @@ export async function getPeriodTotals(db: D1Database, period: string): Promise<P
     .prepare(
       `SELECT account_id,
               COALESCE(SUM(CASE WHEN type = 'allocation' THEN amount_cents END), 0) AS allocated,
-              COALESCE(SUM(CASE WHEN type IN ('spend','refund') THEN amount_cents END), 0) AS spend_net,
+              COALESCE(SUM(CASE
+                WHEN type IN ('spend','refund') THEN amount_cents
+                -- A correction reverses whatever it points at, so it belongs in
+                -- the same total. Without this, voiding a spend leaves the
+                -- month still reporting it.
+                WHEN type = 'void' AND voids_entry_id IN (
+                  SELECT id FROM ledger_entries WHERE type IN ('spend','refund')
+                ) THEN amount_cents
+              END), 0) AS spend_net,
               COALESCE(SUM(amount_cents), 0) AS net
          FROM ledger_entries
         WHERE period = ?

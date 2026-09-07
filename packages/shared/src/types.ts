@@ -118,6 +118,8 @@ export interface LedgerEntry {
   cardId: string | null;
   spendCheckId: string | null;
   counterpartyAccountId: string | null;
+  /** Set on a correction; points at the entry it reverses. */
+  voidsEntryId: string | null;
   note: string | null;
   occurredAt: string;
   createdAt: string;

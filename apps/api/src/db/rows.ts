@@ -80,6 +80,7 @@ export interface LedgerRow {
   card_id: string | null;
   spend_check_id: string | null;
   counterparty_account_id: string | null;
+  voids_entry_id: string | null;
   note: string | null;
   occurred_at: string;
   created_at: string;
@@ -160,6 +161,7 @@ export const toLedgerEntry = (r: LedgerRow): LedgerEntry => ({
   cardId: r.card_id,
   spendCheckId: r.spend_check_id,
   counterpartyAccountId: r.counterparty_account_id,
+  voidsEntryId: r.voids_entry_id,
   note: r.note,
   occurredAt: r.occurred_at,
   createdAt: r.created_at,

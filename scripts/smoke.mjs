@@ -272,5 +272,63 @@ ok('the entry is filed under the month it happened', entry?.period === lastPerio
 ok('and dated to the day picked', entry?.occurredAt.slice(0, 10) === backdated,
    `occurredAt ${entry?.occurredAt}`);
 
+console.log('\n14. Editing a history entry');
+const dinner = await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_joint', estimatedCents: 6000, categoryId: 'cat_dining', merchant: 'Dinner' });
+ok('logged a spend to edit', dinner.body.check?.status === 'settled');
+
+const jointBeforeEdit = (await call(cookie, '/accounts')).body.accounts
+  .find((a) => a.accountId === 'acc_joint');
+const dinnerEntry = (await call(cookie, '/ledger?account=acc_joint')).body.entries
+  .find((e) => e.note === 'Dinner');
+
+const edited = await call(cookie, `/admin/ledger/${dinnerEntry.id}/edit`, 'POST',
+  { amountCents: -7500, note: 'Dinner (with tip)', reason: 'forgot the tip' });
+ok('edit accepted', edited.status === 200, JSON.stringify(edited.body));
+
+const jointAfterEdit = (await call(cookie, '/accounts')).body.accounts
+  .find((a) => a.accountId === 'acc_joint');
+ok('balance moves by the difference only',
+   jointBeforeEdit.balanceCents - jointAfterEdit.balanceCents === 1500,
+   `delta ${jointBeforeEdit.balanceCents - jointAfterEdit.balanceCents}`);
+// This is the bug the feature would otherwise have had: a correction that does
+// not reach the month's Spent figure makes the edit look like it did nothing.
+ok('the month’s spent total reflects the correction',
+   jointAfterEdit.spentCents - jointBeforeEdit.spentCents === 1500,
+   `spent ${jointBeforeEdit.spentCents} -> ${jointAfterEdit.spentCents}`);
+
+const afterEntries = (await call(cookie, '/ledger?account=acc_joint')).body.entries;
+ok('the original is still there', afterEntries.some((e) => e.id === dinnerEntry.id));
+ok('a correction points at it',
+   afterEntries.some((e) => e.type === 'void' && e.voidsEntryId === dinnerEntry.id));
+ok('and the replacement carries the new values',
+   afterEntries.some((e) => e.note === 'Dinner (with tip)' && e.amountCents === -7500));
+ok('editing the same entry twice is refused',
+   (await call(cookie, `/admin/ledger/${dinnerEntry.id}/edit`, 'POST',
+     { amountCents: -100, reason: 'again' })).status === 409);
+
+const replacement = afterEntries.find((e) => e.note === 'Dinner (with tip)');
+ok('a spend cannot be flipped into a credit',
+   (await call(cookie, `/admin/ledger/${replacement.id}/edit`, 'POST',
+     { amountCents: 7500, reason: 'sneaky' })).status === 400);
+
+const transferLeg = (await call(cookie, '/ledger')).body.entries
+  .find((e) => e.type === 'transfer_out');
+if (transferLeg) {
+  ok('a transfer leg cannot be edited',
+     (await call(cookie, `/admin/ledger/${transferLeg.id}/edit`, 'POST',
+       { amountCents: -1, reason: 'no' })).status === 409);
+}
+
+const allocEntry = (await call(cookie, '/ledger?account=acc_joint')).body.entries
+  .find((e) => e.type === 'allocation');
+ok('an allocation cannot be hand-edited',
+   (await call(cookie, `/admin/ledger/${allocEntry.id}/edit`, 'POST',
+     { amountCents: 1, reason: 'no' })).status === 409);
+
+ok('a member cannot edit anything',
+   (await call(kidCookie, `/admin/ledger/${allocEntry.id}/edit`, 'POST',
+     { amountCents: 1, reason: 'no' })).status === 403);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

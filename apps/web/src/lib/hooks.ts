@@ -146,6 +146,27 @@ export const useAdminOverview = (enabled: boolean) =>
     enabled,
   });
 
+export function useEditLedgerEntry() {
+  const refresh = useRefreshMoney();
+  return useMutation({
+    mutationFn: ({ id, ...body }: {
+      id: string; amountCents?: number; accountId?: string;
+      categoryId?: string | null; cardId?: string | null; note?: string | null;
+      occurredOn?: string; reason: string;
+    }) => post(`/admin/ledger/${id}/edit`, body),
+    onSuccess: refresh,
+  });
+}
+
+export function useVoidLedgerEntry() {
+  const refresh = useRefreshMoney();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      post('/admin/void', { ledgerEntryId: id, reason }),
+    onSuccess: refresh,
+  });
+}
+
 export function useAdminMutation<TInput, TResult>(fn: (input: TInput) => Promise<TResult>) {
   const qc = useQueryClient();
   return useMutation({
