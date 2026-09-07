@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AccountSummary, Card, Category, DecisionResult, LedgerEntry, MeResponse, Remedy, SpendCheck, User,
 } from '@budjo/shared';
@@ -37,13 +37,41 @@ export const useRecentChecks = () =>
     queryFn: () => api<{ checks: SpendCheck[] }>('/spend-checks?status=all'),
   });
 
-export const useLedger = (accountId?: string) =>
-  useQuery({
-    queryKey: ['ledger', accountId ?? 'all'],
-    queryFn: () =>
-      api<{ entries: LedgerEntry[]; nextCursor: string | null }>(
-        `/ledger${accountId ? `?account=${encodeURIComponent(accountId)}` : ''}`,
-      ),
+export interface LedgerFilters {
+  accountId?: string;
+  periodFrom?: string;
+  periodTo?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface LedgerPage { entries: LedgerEntry[]; nextCursor: string | null }
+
+/**
+ * Paged so a long history does not have to load at once. The query key carries
+ * the filters, so changing one starts a fresh page rather than appending to the
+ * previous filter's results.
+ */
+export const useLedger = (filters: LedgerFilters = {}) =>
+  useInfiniteQuery({
+    queryKey: ['ledger', filters],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams();
+      if (filters.accountId) params.set('account', filters.accountId);
+      if (filters.periodFrom) params.set('periodFrom', filters.periodFrom);
+      if (filters.periodTo) params.set('periodTo', filters.periodTo);
+      if (filters.from) params.set('from', filters.from);
+      if (filters.to) params.set('to', filters.to);
+      if (pageParam) params.set('cursor', pageParam);
+      const qs = params.toString();
+      return api<LedgerPage>(`/ledger${qs ? `?${qs}` : ''}`);
+    },
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    // Keep the previous filter's results on screen while the new one loads.
+    // Without this every tap on a filter blanks the whole page — unnoticeable
+    // on localhost, jarring on a phone over cellular.
+    placeholderData: (previous) => previous,
   });
 
 /** Anything that moves money invalidates balances, holds and history together. */

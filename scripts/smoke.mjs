@@ -70,7 +70,7 @@ const cookie = await session('usr_one', 'ses_test_one');
 
 console.log('\n1. Identity and lazy allocation');
 const me = await call(cookie, '/me');
-ok('signed in as the seeded admin', me.body.user?.displayName === 'Adult One');
+ok('signed in as the seeded admin', me.body.user?.displayName === 'Alex');
 ok('sees all three accounts', me.body.accounts?.length === 3, JSON.stringify(me.body.accounts?.length));
 ok('can spend from own + joint only', JSON.stringify(me.body.spendableAccountIds?.sort()) === '["acc_joint","acc_one"]',
    JSON.stringify(me.body.spendableAccountIds));
@@ -373,6 +373,50 @@ ok('a member cannot edit anything',
      { amountCents: 1, reason: 'no' })).status === 403);
 ok('nor delete anything',
    (await call(kidCookie, `/admin/ledger/${allocEntry.id}`, 'DELETE')).status === 403);
+
+console.log('\n18. History filters');
+const curPeriod = (await call(cookie, '/accounts')).body.accounts[0].period;
+const priorPeriod = (() => {
+  const [y, m] = curPeriod.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+})();
+
+const allEntries = (await call(cookie, '/ledger')).body.entries;
+const thisMonth = (await call(cookie, `/ledger?periodFrom=${curPeriod}&periodTo=${curPeriod}`)).body.entries;
+const lastMonth = (await call(cookie, `/ledger?periodFrom=${priorPeriod}&periodTo=${priorPeriod}`)).body.entries;
+
+ok('filtering to this month excludes older entries',
+   thisMonth.every((e) => e.period === curPeriod) && thisMonth.length < allEntries.length,
+   `${thisMonth.length} of ${allEntries.length}`);
+ok('filtering to last month returns only that month',
+   lastMonth.length > 0 && lastMonth.every((e) => e.period === priorPeriod),
+   `${lastMonth.length} entries`);
+
+const spanning = (await call(cookie, `/ledger?periodFrom=${priorPeriod}&periodTo=${curPeriod}`)).body.entries;
+ok('a range spans both months', spanning.length === thisMonth.length + lastMonth.length,
+   `${spanning.length} vs ${thisMonth.length}+${lastMonth.length}`);
+
+// A bare `to` date must include everything ON that day, not stop at midnight.
+const todayIso = new Date().toISOString().slice(0, 10);
+const upToToday = (await call(cookie, `/ledger?to=${todayIso}`)).body.entries;
+ok('a `to` date includes entries logged later that same day',
+   upToToday.some((e) => e.occurredAt.slice(0, 10) === todayIso),
+   `${upToToday.length} entries, none dated today`);
+
+const accountScoped = (await call(cookie, `/ledger?account=acc_joint&periodFrom=${curPeriod}&periodTo=${curPeriod}`)).body.entries;
+ok('account and date filters combine',
+   accountScoped.every((e) => e.accountId === 'acc_joint' && e.period === curPeriod));
+
+const paged = await call(cookie, '/ledger?limit=2');
+ok('paging returns a cursor when more remain',
+   paged.body.entries.length === 2 && typeof paged.body.nextCursor === 'string',
+   JSON.stringify({ n: paged.body.entries.length, cursor: paged.body.nextCursor }));
+const nextPage = await call(cookie, `/ledger?limit=2&cursor=${encodeURIComponent(paged.body.nextCursor)}`);
+ok('the next page does not repeat the first',
+   !nextPage.body.entries.some((e) => paged.body.entries.some((p) => p.id === e.id)));
+
+ok('a member still cannot widen the filter to another account',
+   (await call(kidCookie, `/ledger?account=acc_joint&periodFrom=${curPeriod}&periodTo=${curPeriod}`)).status === 404);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

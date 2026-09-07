@@ -175,7 +175,7 @@ SQLite (Cloudflare D1). **All money is stored as signed integer cents.** No floa
 
 ```sql
 family(
-  id, name, timezone TEXT DEFAULT 'America/Chicago',
+  id, name, timezone TEXT DEFAULT 'America/Los_Angeles',
   currency TEXT DEFAULT 'USD',
   reserve_threshold_cents INTEGER DEFAULT 5000,   -- admin-editable
   hold_ttl_hours INTEGER DEFAULT 48,              -- admin-editable
@@ -590,7 +590,7 @@ Insights and trends · savings goals ("saving for a $900 trip") · recurring/pla
 3. **Kids' carry-forward** — assumed **yes**, same as ours. It's arguably the most valuable habit the app teaches.
 4. **Advances for kids** — assumed **off** (`allow_advance = 0`). Borrowing against next month is a sharper tool than a child needs, and the transfer-request flow already covers "can I have $20 more?"
 5. **Personal → joint contributions** — assumed **allowed** (you top up Joint for a shared purchase). Say so if you'd rather Joint be fed only by its monthly allocation.
-6. **Timezone** — assumed `America/Chicago`.
+6. ~~**Timezone**~~ — decided: `America/Los_Angeles`. Both of us are in the Bay Area; this is what decides when the 1st of the month happens.
 7. **Hold expiry** — 48 hours.
 8. **Tight threshold** — amber warning when a purchase leaves under $50.
 9. **Negative balances** — reachable only via advances or an overdrawing settlement, and carried forward. Any hard floor wanted?

@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import type { AccountSummary, LedgerEntry, LedgerType } from '@budjo/shared';
-import { dateOf, formatCents, parseDollarsToCents } from '@budjo/shared';
+import {
+  dateOf, formatCents, formatPeriod, nextPeriod, parseDollarsToCents, periodOf, prevPeriod,
+} from '@budjo/shared';
 import {
   useAccounts, useDeleteLedgerEntry, useEditLedgerEntry, useLedger, useMe, useReference,
   useVoidLedgerEntry,
 } from '../lib/hooks';
 import { Button, Card, Empty, ErrorNote, Field, Select, Spinner, TextInput } from '../components/ui';
+
+type DateFilter = 'this' | 'last' | 'three' | 'all' | 'custom';
 
 const TYPE_LABEL: Record<LedgerType, string> = {
   allocation: 'Monthly allocation',
@@ -29,16 +33,40 @@ const EDITABLE: LedgerType[] = ['spend', 'refund', 'adjustment'];
 
 export function History() {
   const [accountId, setAccountId] = useState<string>('');
+  const [range, setRange] = useState<DateFilter>('this');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
+
   const me = useMe();
   const accounts = useAccounts();
   const reference = useReference();
-  const ledger = useLedger(accountId || undefined);
 
-  if (ledger.isLoading) return <Spinner />;
+  const timezone = me.data?.family.timezone ?? 'UTC';
+  const thisPeriod = periodOf(new Date(), timezone);
+
+  // Month filters go through `period`, not timestamps: period is the month an
+  // entry belongs to in our timezone, and an evening spend here is already the
+  // next day in UTC.
+  const filters =
+    range === 'this' ? { periodFrom: thisPeriod, periodTo: thisPeriod }
+    : range === 'last' ? { periodFrom: prevPeriod(thisPeriod), periodTo: prevPeriod(thisPeriod) }
+    : range === 'three' ? { periodFrom: prevPeriod(prevPeriod(thisPeriod)), periodTo: thisPeriod }
+    : range === 'custom' ? { from: customFrom || undefined, to: customTo || undefined }
+    : {};
+
+  const ledger = useLedger({ ...filters, accountId: accountId || undefined });
+
+  // Only take over the page on the very first load; afterwards the previous
+  // results stay put and we just dim them while the new filter arrives.
+  if (ledger.isLoading && !ledger.data) return <Spinner />;
   if (ledger.isError) return <ErrorNote error={ledger.error} />;
 
-  const entries = ledger.data?.entries ?? [];
+  const refreshing = ledger.isFetching && !ledger.isFetchingNextPage;
+
+  const entries = ledger.data?.pages.flatMap((p) => p.entries) ?? [];
+  const loadedEverything = !ledger.hasNextPage;
+  const net = entries.reduce((sum, e) => sum + e.amountCents, 0);
   const isAdmin = me.data?.user.role === 'admin';
   const categoryName = (id: string | null) => reference.data?.categories.find((c) => c.id === id)?.name;
   const cardName = (id: string | null) => reference.data?.cards.find((c) => c.id === id)?.name;
@@ -59,19 +87,65 @@ export function History() {
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold">History</h1>
 
-      <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-        <option value="">All accounts I can see</option>
-        {(accounts.data?.accounts ?? []).map((a) => (
-          <option key={a.accountId} value={a.accountId}>{a.account.name}</option>
-        ))}
-      </Select>
+      <Pills
+        options={[
+          { value: '', label: 'All' },
+          ...(accounts.data?.accounts ?? []).map((a) => ({
+            value: a.accountId, label: a.account.name,
+          })),
+        ]}
+        value={accountId}
+        onChange={setAccountId}
+      />
 
-      {isAdmin ? (
-        <p className="muted text-xs">Tap an entry to correct it.</p>
+      <Pills
+        options={[
+          { value: 'this', label: formatPeriod(thisPeriod).split(' ')[0]! },
+          { value: 'last', label: formatPeriod(prevPeriod(thisPeriod)).split(' ')[0]! },
+          { value: 'three', label: 'Last 3 months' },
+          { value: 'all', label: 'All time' },
+          { value: 'custom', label: 'Custom' },
+        ]}
+        value={range}
+        onChange={(v) => setRange(v as DateFilter)}
+      />
+
+      {range === 'custom' ? (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="From">
+            <TextInput type="date" value={customFrom} max={dateOf(new Date(), timezone)}
+                       onChange={(e) => setCustomFrom(e.target.value)} />
+          </Field>
+          <Field label="To">
+            <TextInput type="date" value={customTo} max={dateOf(new Date(), timezone)}
+                       onChange={(e) => setCustomTo(e.target.value)} />
+          </Field>
+        </div>
       ) : null}
 
+      {entries.length > 0 ? (
+        <div className="flex items-baseline justify-between px-1">
+          <span className="muted text-xs">
+            {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+            {loadedEverything ? '' : ' so far'}
+          </span>
+          {loadedEverything ? (
+            <span className={`tnum text-xs font-medium ${net < 0 ? '' : 'text-emerald-500'}`}>
+              net {formatCents(net, { sign: net > 0 })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {isAdmin ? (
+        <p className="muted px-1 text-xs">Tap an entry to edit or correct it.</p>
+      ) : null}
+
+      <div className={refreshing ? 'opacity-50 transition-opacity' : 'transition-opacity'}>
       {entries.length === 0 ? (
-        <Empty>Nothing here yet.</Empty>
+        <Empty>
+          {range === 'all' ? 'Nothing here yet.' : 'Nothing in this range.'}
+        </Empty>
       ) : (
         Object.entries(byDay).map(([day, dayEntries]) => (
           <section key={day}>
@@ -125,6 +199,19 @@ export function History() {
         ))
       )}
 
+      </div>
+
+      {ledger.hasNextPage ? (
+        <Button
+          variant="secondary"
+          className="w-full"
+          disabled={ledger.isFetchingNextPage}
+          onClick={() => void ledger.fetchNextPage()}
+        >
+          {ledger.isFetchingNextPage ? 'Loading…' : 'Load older entries'}
+        </Button>
+      ) : null}
+
       {editing ? (
         <EditSheet
           entry={editing}
@@ -137,6 +224,41 @@ export function History() {
           onClose={() => setEditing(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A row of pills instead of a dropdown. With a handful of accounts every option
+ * is visible and one tap away, and the current filter is readable without
+ * opening anything — a dropdown hides both.
+ */
+function Pills({
+  options, value, onChange,
+}: {
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1"
+         style={{ scrollbarWidth: 'none' }}>
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={option.value}
+            onClick={() => onChange(option.value)}
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm whitespace-nowrap transition ${
+              active
+                ? 'bg-[var(--accent)] font-medium text-black'
+                : 'surface muted'
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

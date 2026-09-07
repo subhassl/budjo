@@ -265,8 +265,18 @@ export async function listPendingChecks(
 
 export interface LedgerQuery {
   accountIds: readonly string[];
+  /** Day bounds on when it happened, for a custom range. */
   from?: string;
   to?: string;
+  /**
+   * Month bounds ('YYYY-MM'). Preferred for month-shaped filters: `period` is
+   * the month an entry belongs to in the family's timezone, whereas
+   * occurred_at is a UTC instant. A Tuesday-evening spend in California is
+   * already Wednesday in UTC, so filtering months by timestamp drops entries
+   * at the edges.
+   */
+  periodFrom?: string;
+  periodTo?: string;
   categoryId?: string;
   cardId?: string;
   limit?: number;
@@ -281,6 +291,8 @@ export async function listLedger(db: D1Database, q: LedgerQuery): Promise<{ entr
 
   if (q.from) { clauses.push('occurred_at >= ?'); binds.push(q.from); }
   if (q.to) { clauses.push('occurred_at <= ?'); binds.push(q.to); }
+  if (q.periodFrom) { clauses.push('period >= ?'); binds.push(q.periodFrom); }
+  if (q.periodTo) { clauses.push('period <= ?'); binds.push(q.periodTo); }
   if (q.categoryId) { clauses.push('category_id = ?'); binds.push(q.categoryId); }
   if (q.cardId) { clauses.push('card_id = ?'); binds.push(q.cardId); }
   // Cursor is the last row's (occurred_at, id) pair, keeping paging stable when

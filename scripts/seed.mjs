@@ -21,8 +21,8 @@ const flag = (name, fallback) => {
 };
 const remote = args.includes('--remote');
 
-const USER1 = flag('user1', 'Adult One');
-const USER2 = flag('user2', 'Adult Two');
+const USER1 = flag('user1', 'Alex');
+const USER2 = flag('user2', 'Sam');
 // The account label is what the home screen shows above the balance, so it
 // defaults to a first name rather than the full one. Override with --account1/2.
 const firstName = (full) => full.trim().split(/\s+/)[0];
@@ -30,7 +30,7 @@ const ACCOUNT1 = flag('account1', firstName(USER1));
 const ACCOUNT2 = flag('account2', firstName(USER2));
 const PERSONAL_CENTS = Number(flag('personal', '20000'));
 const JOINT_CENTS = Number(flag('joint', '20000'));
-const TIMEZONE = flag('timezone', 'America/Chicago');
+const TIMEZONE = flag('timezone', 'America/Los_Angeles');
 
 const now = new Date().toISOString();
 const period = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year: 'numeric', month: '2-digit' })
