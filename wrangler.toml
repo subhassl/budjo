@@ -14,7 +14,7 @@ not_found_handling = "none"
 [[d1_databases]]
 binding = "DB"
 database_name = "budjo"
-database_id = "00000000-0000-0000-0000-000000000000"  # replace after `wrangler d1 create budjo`
+database_id = "8f694d21-24ed-451d-a53d-251fd9e05de6"
 migrations_dir = "migrations"
 
 # Daily at 06:00 UTC: allocate the month, repay advances, expire stale holds.
