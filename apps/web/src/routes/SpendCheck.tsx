@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { AccountSummary, Remedy } from '@budjo/shared';
-import { formatCents, parseDollarsToCents } from '@budjo/shared';
+import { dateOf, formatCents, parseDollarsToCents } from '@budjo/shared';
 import {
-  useAccounts, useAdvance, useCreateCheck, useQuickSpend, useReference, useRepriceCheck, useSettleCheck,
-  type CheckResult,
+  useAccounts, useAdvance, useCreateCheck, useMe, useQuickSpend, useReference, useRepriceCheck,
+  useSettleCheck, type CheckResult,
 } from '../lib/hooks';
-import { Button, Card, ErrorNote, Spinner, TextInput } from '../components/ui';
+import { Button, Card, ErrorNote, Field, Spinner, TextInput } from '../components/ui';
 
 type Step = 'amount' | 'details' | 'verdict';
 
@@ -20,6 +20,7 @@ export function SpendCheck() {
   const quickMode = params.get('quick') === '1';
   const navigate = useNavigate();
 
+  const me = useMe();
   const accounts = useAccounts();
   const reference = useReference();
   const createCheck = useCreateCheck();
@@ -32,13 +33,17 @@ export function SpendCheck() {
   const [cardId, setCardId] = useState<string | null>(null);
   const [merchant, setMerchant] = useState('');
   const [outcome, setOutcome] = useState<CheckResult | null>(null);
+  // Only meaningful when logging after the fact — a pre-approval is by
+  // definition about to happen, so the field is hidden there.
+  const today = dateOf(new Date(), me.data?.family.timezone ?? 'UTC');
+  const [occurredOn, setOccurredOn] = useState(today);
 
   const spendable = useMemo(
     () => (accounts.data?.accounts ?? []).filter((a) => a.canSpend),
     [accounts.data],
   );
 
-  if (accounts.isLoading || reference.isLoading) return <Spinner />;
+  if (accounts.isLoading || reference.isLoading || me.isLoading) return <Spinner />;
 
   const cents = parseDollarsToCents(amount) ?? 0;
   const chosenAccount = spendable.find((a) => a.accountId === (accountId ?? spendable[0]?.accountId));
@@ -61,7 +66,9 @@ export function SpendCheck() {
       cardId,
       merchant: merchant.trim() || null,
     };
-    const result = quickMode ? await quickSpend.mutateAsync(input) : await createCheck.mutateAsync(input);
+    const result = quickMode
+      ? await quickSpend.mutateAsync({ ...input, occurredOn })
+      : await createCheck.mutateAsync(input);
     setOutcome(result);
     setStep('verdict');
   }
@@ -162,6 +169,17 @@ export function SpendCheck() {
               ))}
             </div>
           </section>
+
+          {quickMode ? (
+            <Field label="When" hint={occurredOn === today ? undefined : 'Counts towards that month.'}>
+              <TextInput
+                type="date"
+                value={occurredOn}
+                max={today}
+                onChange={(e) => setOccurredOn(e.target.value || today)}
+              />
+            </Field>
+          ) : null}
 
           <TextInput
             value={merchant}

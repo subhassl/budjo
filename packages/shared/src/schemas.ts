@@ -25,14 +25,21 @@ export const createSpendCheckSchema = z.object({
   note: z.string().max(500).nullish(),
 });
 
+export const calendarDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+
 export const settleSpendCheckSchema = z.object({
   actualCents: centsSchema,
+  /** Omit for today. Backdating puts the entry in the month it happened. */
+  occurredOn: calendarDateSchema.optional(),
 });
 
 export const repriceSchema = z.object({ accountId: idSchema });
 
 export const quickSpendSchema = createSpendCheckSchema.extend({
   actualCents: centsSchema.optional(),
+  occurredOn: calendarDateSchema.optional(),
 });
 
 export const createTransferSchema = z.object({

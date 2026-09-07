@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import type { Account, User } from '@budjo/shared';
+import type { Account, Card as CardType, User } from '@budjo/shared';
 import { formatCents, formatPeriod, parseDollarsToCents, periodOf } from '@budjo/shared';
-import { api, patch, post } from '../lib/api';
+import { api, del, patch, post } from '../lib/api';
 import { useAdminMutation, useAdminOverview, type AdminOverview } from '../lib/hooks';
 import { Button, Card, ErrorNote, Field, Select, Spinner, TextInput } from '../components/ui';
 
@@ -26,7 +26,10 @@ export function Admin() {
       <Section title="Corrections">
         <Adjustments data={data} />
       </Section>
-      <Section title="Categories &amp; cards">
+      <Section title="Cards">
+        <Cards data={data} />
+      </Section>
+      <Section title="Categories">
         <Reference data={data} />
       </Section>
       <Section title="Data">
@@ -447,11 +450,140 @@ function Adjustments({ data }: { data: AdminOverview }) {
   );
 }
 
+/**
+ * Full card management. The reward note is what the spend flow shows when it
+ * suggests a card, and the statement close day is the number you actually want
+ * when reconciling a bill against what you logged.
+ */
+function Cards({ data }: { data: AdminOverview }) {
+  const [adding, setAdding] = useState(false);
+  const update = useAdminMutation((input: { id: string; body: unknown }) =>
+    patch(`/admin/cards/${input.id}`, input.body));
+  const archive = useAdminMutation((id: string) => del(`/admin/cards/${id}`));
+  const create = useAdminMutation((body: unknown) => post('/admin/cards', body));
+
+  return (
+    <div className="flex flex-col gap-3">
+      {data.cards.map((card) => (
+        <CardEditor
+          key={card.id}
+          card={card}
+          onSave={(body) => update.mutate({ id: card.id, body })}
+          onArchive={() => archive.mutate(card.id)}
+        />
+      ))}
+
+      <ErrorNote error={update.error ?? archive.error ?? create.error} />
+
+      {adding ? (
+        <CardEditor
+          key="new"
+          card={{ id: '', name: '', issuer: null, last4: null, rewardNote: null,
+                  statementCloseDay: null, dueDay: null }}
+          isNew
+          onSave={(body) => { create.mutate(body); setAdding(false); }}
+          onArchive={() => setAdding(false)}
+        />
+      ) : (
+        <Button variant="secondary" className="w-full" onClick={() => setAdding(true)}>
+          Add a card
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function CardEditor({
+  card, onSave, onArchive, isNew = false,
+}: {
+  card: CardType;
+  onSave: (body: unknown) => void;
+  onArchive: () => void;
+  isNew?: boolean;
+}) {
+  const [name, setName] = useState(card.name);
+  const [issuer, setIssuer] = useState(card.issuer ?? '');
+  const [last4, setLast4] = useState(card.last4 ?? '');
+  const [reward, setReward] = useState(card.rewardNote ?? '');
+  const [close, setClose] = useState(card.statementCloseDay?.toString() ?? '');
+  const [due, setDue] = useState(card.dueDay?.toString() ?? '');
+  const [open, setOpen] = useState(isNew);
+
+  // Empty inputs must go back as null, not '' — last4 is validated as four
+  // digits, and an empty string would be rejected rather than cleared.
+  const blankToNull = (v: string) => (v.trim() === '' ? null : v.trim());
+  const dayOrNull = (v: string) => (v.trim() === '' ? null : Number(v));
+
+  const body = {
+    name: name.trim(),
+    issuer: blankToNull(issuer),
+    last4: blankToNull(last4),
+    rewardNote: blankToNull(reward),
+    statementCloseDay: dayOrNull(close),
+    dueDay: dayOrNull(due),
+  };
+
+  const last4Invalid = last4.trim() !== '' && !/^\d{4}$/.test(last4.trim());
+  const dayInvalid = (v: string) => v.trim() !== '' && !(Number(v) >= 1 && Number(v) <= 31);
+  const invalid = name.trim() === '' || last4Invalid || dayInvalid(close) || dayInvalid(due);
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] px-3 py-2.5 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block truncate text-sm">{card.name}</span>
+          <span className="muted block truncate text-xs">
+            {[card.issuer, card.last4 ? `••${card.last4}` : null, card.rewardNote]
+              .filter(Boolean).join(' · ') || 'No details yet'}
+          </span>
+        </span>
+        <span className="muted shrink-0 pl-2">Edit</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-[var(--border)] p-3">
+      <Field label="Name"><TextInput value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      <Field label="Issuer"><TextInput value={issuer} onChange={(e) => setIssuer(e.target.value)} /></Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Last 4" hint={last4Invalid ? 'Four digits, or blank' : undefined}>
+          <TextInput value={last4} inputMode="numeric" maxLength={4}
+                     onChange={(e) => setLast4(e.target.value)} />
+        </Field>
+        <Field label="Reward">
+          <TextInput value={reward} placeholder="4x dining"
+                     onChange={(e) => setReward(e.target.value)} />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Statement closes" hint="Day of month">
+          <TextInput value={close} inputMode="numeric"
+                     onChange={(e) => setClose(e.target.value)} />
+        </Field>
+        <Field label="Payment due" hint="Day of month">
+          <TextInput value={due} inputMode="numeric"
+                     onChange={(e) => setDue(e.target.value)} />
+        </Field>
+      </div>
+      <div className="flex gap-2">
+        <Button variant="danger" className="px-3 py-2 text-xs" onClick={onArchive}>
+          {isNew ? 'Cancel' : 'Archive'}
+        </Button>
+        <Button className="flex-1" disabled={invalid} onClick={() => { onSave(body); setOpen(isNew); }}>
+          {isNew ? 'Add card' : 'Save'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function Reference({ data }: { data: AdminOverview }) {
   const [categoryName, setCategoryName] = useState('');
-  const [cardName, setCardName] = useState('');
   const addCategory = useAdminMutation((body: unknown) => post('/admin/categories', body));
-  const addCard = useAdminMutation((body: unknown) => post('/admin/cards', body));
   const setRule = useAdminMutation((body: unknown) => post('/admin/card-rules', body));
 
   return (
@@ -485,18 +617,7 @@ function Reference({ data }: { data: AdminOverview }) {
         </Button>
       </div>
 
-      <div className="flex gap-2">
-        <TextInput value={cardName} placeholder="New card" onChange={(e) => setCardName(e.target.value)} />
-        <Button
-          variant="secondary"
-          disabled={!cardName.trim()}
-          onClick={() => { addCard.mutate({ name: cardName.trim() }); setCardName(''); }}
-        >
-          Add
-        </Button>
-      </div>
-
-      <ErrorNote error={addCategory.error ?? addCard.error ?? setRule.error} />
+      <ErrorNote error={addCategory.error ?? setRule.error} />
     </div>
   );
 }

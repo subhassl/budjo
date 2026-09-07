@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import {
-  createSpendCheckSchema, quickSpendSchema, repriceSchema, settleSpendCheckSchema,
+  createSpendCheckSchema, dateOf, isCalendarDate, quickSpendSchema, repriceSchema,
+  settleSpendCheckSchema,
 } from '@budjo/shared';
 import type { AppEnv } from '../env';
 import { assertCanSpend, assertCanView } from '../domain/access';
@@ -14,6 +15,19 @@ import { idempotency } from '../middleware/idempotency';
 import { visibleAccounts } from '../domain/access';
 
 export const spendCheckRoutes = new Hono<AppEnv>();
+
+/**
+ * You can record something you forgot to log, but not something that hasn't
+ * happened. A future-dated spend would sit in a month the allocation hasn't
+ * reached, which is a budgeting question this app deliberately doesn't answer.
+ */
+function assertPastOrToday(occurredOn: string | undefined, timezone: string): void {
+  if (!occurredOn) return;
+  if (!isCalendarDate(occurredOn)) throw badRequest('That is not a real date');
+  if (occurredOn > dateOf(new Date(), timezone)) {
+    throw badRequest('You cannot log a spend in the future');
+  }
+}
 
 spendCheckRoutes.post('/spend-checks', idempotency, async (c) => {
   const parsed = createSpendCheckSchema.safeParse(await c.req.json().catch(() => null));
@@ -46,8 +60,10 @@ spendCheckRoutes.post('/spend-checks/:id/settle', idempotency, async (c) => {
   if (!check) throw notFound('No such spend check');
   assertCanSpend(ctx, check.accountId);
 
+  assertPastOrToday(parsed.data.occurredOn, c.get('family').timezone);
   const settled = await settleSpendCheck(
     c.env.DB, ctx, c.get('family'), check.id, parsed.data.actualCents,
+    parsed.data.occurredOn ? { occurredOn: parsed.data.occurredOn } : {},
   );
   return c.json({ check: settled });
 });
@@ -84,6 +100,7 @@ spendCheckRoutes.post('/spends', idempotency, async (c) => {
 
   const ctx = c.get('access');
   assertCanSpend(ctx, parsed.data.accountId);
+  assertPastOrToday(parsed.data.occurredOn, c.get('family').timezone);
   const result = await quickSpend(c.env.DB, ctx, c.get('family'), parsed.data);
   return c.json(result);
 });

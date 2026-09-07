@@ -73,6 +73,8 @@ export function useQuickSpend() {
     mutationFn: (input: {
       accountId: string; estimatedCents: number; actualCents?: number;
       categoryId?: string | null; cardId?: string | null; merchant?: string | null;
+      /** 'YYYY-MM-DD'; omit for today. */
+      occurredOn?: string;
     }) => post<CheckResult>('/spends', input, idemKey()),
     onSuccess: refresh,
   });
@@ -81,8 +83,13 @@ export function useQuickSpend() {
 export function useSettleCheck() {
   const refresh = useRefreshMoney();
   return useMutation({
-    mutationFn: ({ id, actualCents }: { id: string; actualCents: number }) =>
-      post<{ check: SpendCheck }>(`/spend-checks/${id}/settle`, { actualCents }, idemKey()),
+    mutationFn: ({ id, actualCents, occurredOn }:
+      { id: string; actualCents: number; occurredOn?: string }) =>
+      post<{ check: SpendCheck }>(
+        `/spend-checks/${id}/settle`,
+        occurredOn ? { actualCents, occurredOn } : { actualCents },
+        idemKey(),
+      ),
     onSuccess: refresh,
   });
 }

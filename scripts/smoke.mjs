@@ -234,5 +234,43 @@ const after = (await call(cookie, '/accounts')).body.accounts
   .find((a) => a.accountId === kidAcct).balanceCents;
 ok('the balance reflects the new amount', after - before === 2500, `delta ${after - before}`);
 
+console.log('\n13. Backdating a logged spend');
+const future = await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_joint', estimatedCents: 500, occurredOn: '2099-01-01' });
+ok('refuses a spend dated in the future', future.status === 400, `status ${future.status}`);
+
+const badDate = await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_joint', estimatedCents: 500, occurredOn: '2026-02-30' });
+ok('refuses a date that does not exist', badDate.status === 400, `status ${badDate.status}`);
+
+const thisPeriod = (await call(cookie, '/accounts')).body.accounts[0].period;
+const lastPeriod = (() => {
+  const [y, m] = thisPeriod.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+})();
+const backdated = `${lastPeriod}-15`;
+
+const jointBefore = (await call(cookie, '/accounts')).body.accounts
+  .find((a) => a.accountId === 'acc_joint');
+const logged = await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_joint', estimatedCents: 1234, occurredOn: backdated, merchant: 'Last month' });
+ok('accepts a spend dated last month', logged.status === 200 && logged.body.check?.status === 'settled',
+   JSON.stringify(logged.body).slice(0, 120));
+
+const jointAfter = (await call(cookie, '/accounts')).body.accounts
+  .find((a) => a.accountId === 'acc_joint');
+ok('the balance still moves', jointBefore.balanceCents - jointAfter.balanceCents === 1234,
+   `delta ${jointBefore.balanceCents - jointAfter.balanceCents}`);
+ok('but it does NOT count against this month’s spend total',
+   jointAfter.spentCents === jointBefore.spentCents,
+   `this month spent ${jointBefore.spentCents} -> ${jointAfter.spentCents}`);
+
+const entry = (await call(cookie, '/ledger?account=acc_joint')).body.entries
+  .find((e) => e.note === 'Last month');
+ok('the entry is filed under the month it happened', entry?.period === lastPeriod,
+   `period ${entry?.period}, expected ${lastPeriod}`);
+ok('and dated to the day picked', entry?.occurredAt.slice(0, 10) === backdated,
+   `occurredAt ${entry?.occurredAt}`);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

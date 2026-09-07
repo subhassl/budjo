@@ -1,5 +1,5 @@
 import {
-  periodOf,
+  occurredAtFor, periodFromDate, periodOf,
   type DecisionResult, type FamilySettings, type Remedy, type SpendCheck,
 } from '@budjo/shared';
 import { decide, isOverdrawnSettlement } from '../domain/decision';
@@ -222,6 +222,7 @@ export async function settleSpendCheck(
   family: FamilySettings,
   checkId: string,
   actualCents: number,
+  opts: { occurredOn?: string } = {},
   now = new Date(),
 ): Promise<SpendCheck> {
   const iso = nowIso(now);
@@ -235,7 +236,14 @@ export async function settleSpendCheck(
   const ownHold = check.status === 'pending' && check.expiresAt > iso ? check.estimatedCents : 0;
   const availableExcludingThisHold = balance.balanceCents - (balance.holdCents - ownHold);
   const overdrawn = isOverdrawnSettlement(actualCents, availableExcludingThisHold);
-  const period = periodOf(now, family.timezone);
+
+  // A backdated spend belongs to the month it happened, not the month it was
+  // typed in. The balance is a running sum over every entry, so this only moves
+  // which month's "spent" total it lands in — no money appears or vanishes.
+  const period = opts.occurredOn ? periodFromDate(opts.occurredOn) : periodOf(now, family.timezone);
+  const occurredAt = opts.occurredOn
+    ? occurredAtFor(opts.occurredOn, family.timezone, now)
+    : iso;
 
   const statements: D1PreparedStatement[] = [
     db.prepare(
@@ -257,7 +265,7 @@ export async function settleSpendCheck(
         cardId: check.cardId,
         spendCheckId: check.id,
         note: check.merchant ?? check.note,
-        occurredAt: iso,
+        occurredAt,
         createdBy: ctx.user.id,
       }),
     );
@@ -327,14 +335,16 @@ export async function quickSpend(
   db: D1Database,
   ctx: AccessContext,
   family: FamilySettings,
-  input: CreateCheckInput & { actualCents?: number },
+  input: CreateCheckInput & { actualCents?: number; occurredOn?: string },
   now = new Date(),
 ): Promise<{ check: SpendCheck; result: DecisionResult; remedies: Remedy[] }> {
   const created = await createSpendCheck(db, ctx, family, input, now);
   if (created.check.status !== 'pending') return created;
   const settled = await settleSpendCheck(
     db, ctx, family, created.check.id,
-    input.actualCents ?? input.estimatedCents, now,
+    input.actualCents ?? input.estimatedCents,
+    input.occurredOn ? { occurredOn: input.occurredOn } : {},
+    now,
   );
   return { ...created, check: settled };
 }
