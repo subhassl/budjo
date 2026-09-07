@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -9,6 +9,7 @@ import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers';
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 import type { AppEnv } from '../env';
 import { badRequest, forbidden, unauthorized } from '../lib/http';
+import { isProduction } from '../env';
 import { hashCode, newId, timingSafeEqual } from '../lib/ids';
 import { nowIso } from '../lib/time';
 import {
@@ -36,10 +37,20 @@ interface CredentialRow {
   transports: string | null;
 }
 
-function rp(c: { req: { url: string; header: (n: string) => string | undefined } }) {
-  const origin = c.req.header('Origin') ?? new URL(c.req.url).origin;
-  const rpID = new URL(origin).hostname;
-  return { origin, rpID, secure: origin.startsWith('https://') };
+/**
+ * The relying party for WebAuthn, and whether cookies get the Secure flag.
+ *
+ * Derived from the URL the Worker was actually reached on, NOT from the
+ * client-supplied Origin header — otherwise a caller could nominate its own
+ * expected origin, or ask for a cookie without Secure. The one exception is
+ * local development, where the Vite proxy means the browser's origin
+ * (localhost:5173) genuinely differs from the Worker's (localhost:8787).
+ */
+function rp(c: Context<AppEnv>) {
+  const requestUrl = new URL(c.req.url);
+  const live = isProduction(c.env);
+  const origin = live ? requestUrl.origin : (c.req.header('Origin') ?? requestUrl.origin);
+  return { origin, rpID: new URL(origin).hostname, secure: live };
 }
 
 async function credentialCount(db: D1Database): Promise<number> {

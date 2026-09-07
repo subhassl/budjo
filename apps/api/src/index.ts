@@ -11,6 +11,7 @@ import { moneyRoutes } from './routes/money';
 import { spendCheckRoutes } from './routes/spendChecks';
 import { getFamily } from './db/repo';
 import { runMaintenance } from './services/maintenance';
+import { isProduction } from './env';
 
 const app = new Hono<AppEnv>();
 
@@ -23,6 +24,21 @@ app.onError((err, c) => {
   }
   console.error('Unhandled error', err);
   return c.json({ error: 'Something went wrong', code: 'internal' }, 500);
+});
+
+/**
+ * Force HTTPS. Session cookies are the whole authentication story here, so a
+ * plain-HTTP hit must never be served a page that could set one. Doing it in
+ * the Worker rather than via a dashboard toggle keeps it in version control and
+ * true of every environment.
+ */
+app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+  if (url.protocol === 'http:' && isProduction(c.env)) {
+    url.protocol = 'https:';
+    return c.redirect(url.toString(), 301);
+  }
+  await next();
 });
 
 app.get('/api/health', (c) => c.json({ ok: true }));

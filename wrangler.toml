@@ -3,6 +3,15 @@ main = "apps/api/src/index.ts"
 compatibility_date = "2024-12-05"
 compatibility_flags = ["nodejs_compat"]
 
+# Served from a custom domain rather than *.workers.dev. Passkeys are bound to
+# the hostname, so settling this before anyone registers avoids everyone having
+# to re-enrol later. Wrangler creates the DNS record and the domain binding.
+workers_dev = false
+
+[[routes]]
+pattern = "budjo.theserenelifestyle.com"
+custom_domain = true
+
 # The Worker serves the built PWA as static assets and handles /api itself.
 # not_found_handling = "none" so unknown paths fall through to the Worker,
 # which returns the SPA shell for client-side routes and JSON 404s for /api.
@@ -23,3 +32,5 @@ crons = ["0 6 * * *"]
 
 [vars]
 APP_NAME = "Budjo"
+# Overridden to "development" in .dev.vars for local work.
+APP_ENV = "production"

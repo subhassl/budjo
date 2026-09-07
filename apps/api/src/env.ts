@@ -6,7 +6,18 @@ export interface Env {
   ASSETS: Fetcher;
   SESSION_SECRET: string;
   APP_NAME?: string;
+  /**
+   * "production" everywhere except local development, where .dev.vars overrides
+   * it. Nothing in the request itself can tell the two apart: configuring a
+   * custom domain makes Miniflare rewrite the local URL and Host header to that
+   * domain, so hostname sniffing reports budjo.theserenelifestyle.com even on
+   * localhost. Defaults to production if unset, so a missing var fails closed.
+   */
+  APP_ENV?: string;
 }
+
+export const isProduction = (env: Pick<Env, 'APP_ENV'>): boolean =>
+  (env.APP_ENV ?? 'production') === 'production';
 
 export interface Variables {
   user: User;

@@ -1,3 +1,8 @@
 # Copy to .dev.vars for local development (wrangler loads it automatically).
 # Generate with: openssl rand -base64 48
 SESSION_SECRET="replace-me-with-a-long-random-string"
+
+# Local development only. Without this the Worker forces HTTPS and binds
+# passkeys to the production domain, because a configured custom domain makes
+# Miniflare rewrite the local URL and Host header to that domain.
+APP_ENV="development"
