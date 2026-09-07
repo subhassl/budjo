@@ -61,36 +61,21 @@ function People({ data }: { data: AdminOverview }) {
   return (
     <div className="flex flex-col gap-3">
       {data.users.map((user) => (
-        <div key={user.id} className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="truncate text-sm">{user.displayName}</div>
-            <div className="muted text-xs">{user.role} · {user.status}</div>
-          </div>
-          <div className="flex shrink-0 gap-1.5">
-            <Button
-              variant="secondary"
-              className="px-2.5 py-1.5 text-xs"
-              onClick={async () => {
-                const res = await createInvite.mutateAsync(user.id);
-                setInvite({ name: user.displayName, code: res.inviteCode });
-              }}
-            >
-              Invite code
-            </Button>
-            <Button
-              variant="secondary"
-              className="px-2.5 py-1.5 text-xs"
-              onClick={() =>
-                updateUser.mutate({
-                  id: user.id,
-                  body: { role: user.role === 'admin' ? 'member' : 'admin' },
-                })
-              }
-            >
-              Make {user.role === 'admin' ? 'member' : 'admin'}
-            </Button>
-          </div>
-        </div>
+        <UserRow
+          key={user.id}
+          user={user}
+          onRename={(displayName) => updateUser.mutate({ id: user.id, body: { displayName } })}
+          onToggleRole={() =>
+            updateUser.mutate({
+              id: user.id,
+              body: { role: user.role === 'admin' ? 'member' : 'admin' },
+            })
+          }
+          onInvite={async () => {
+            const res = await createInvite.mutateAsync(user.id);
+            setInvite({ name: user.displayName, code: res.inviteCode });
+          }}
+        />
       ))}
 
       <ErrorNote error={updateUser.error ?? createInvite.error} />
@@ -109,6 +94,45 @@ function People({ data }: { data: AdminOverview }) {
           Add a family member
         </Button>
       )}
+    </div>
+  );
+}
+
+function UserRow({
+  user, onRename, onToggleRole, onInvite,
+}: {
+  user: User;
+  onRename: (displayName: string) => void;
+  onToggleRole: () => void;
+  onInvite: () => void;
+}) {
+  const [name, setName] = useState(user.displayName);
+  const dirty = name.trim() !== user.displayName && name.trim().length > 0;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-[var(--border)] p-3">
+      <div className="flex items-center gap-2">
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} />
+        <Button
+          variant="secondary"
+          className="px-3 py-2 text-xs"
+          disabled={!dirty}
+          onClick={() => onRename(name.trim())}
+        >
+          Rename
+        </Button>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="muted text-xs">{user.role} · {user.status}</span>
+        <div className="flex shrink-0 gap-1.5">
+          <Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={onInvite}>
+            Invite code
+          </Button>
+          <Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={onToggleRole}>
+            Make {user.role === 'admin' ? 'member' : 'admin'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -253,6 +277,7 @@ function AccountEditor({
   onSaveAccount: (body: unknown) => void;
   onSaveAccess: (userIds: string[]) => void;
 }) {
+  const [name, setName] = useState(account.name);
   const [amount, setAmount] = useState((currentAmountCents / 100).toFixed(2));
   const [cap, setCap] = useState(
     account.maxAdvanceCents === null ? '' : (account.maxAdvanceCents / 100).toFixed(2),
@@ -264,6 +289,19 @@ function AccountEditor({
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">{account.name}</span>
         <span className="muted text-xs">{account.kind}</span>
+      </div>
+
+      <div className="flex items-end gap-2">
+        <Field label="Shown on the home screen">
+          <TextInput value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Button
+          variant="secondary"
+          disabled={name.trim() === account.name || name.trim().length === 0}
+          onClick={() => onSaveAccount({ name: name.trim() })}
+        >
+          Save
+        </Button>
       </div>
 
       <div className="flex items-end gap-2">

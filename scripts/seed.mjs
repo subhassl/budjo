@@ -23,6 +23,11 @@ const remote = args.includes('--remote');
 
 const USER1 = flag('user1', 'Adult One');
 const USER2 = flag('user2', 'Adult Two');
+// The account label is what the home screen shows above the balance, so it
+// defaults to a first name rather than the full one. Override with --account1/2.
+const firstName = (full) => full.trim().split(/\s+/)[0];
+const ACCOUNT1 = flag('account1', firstName(USER1));
+const ACCOUNT2 = flag('account2', firstName(USER2));
 const PERSONAL_CENTS = Number(flag('personal', '20000'));
 const JOINT_CENTS = Number(flag('joint', '20000'));
 const TIMEZONE = flag('timezone', 'America/Chicago');
@@ -75,9 +80,9 @@ const lines = [
    VALUES ('usr_two', 'fam_main', ${q(USER2)}, NULL, 'admin', 'active', ${q(now)});`,
 
   `INSERT OR IGNORE INTO accounts (id, family_id, kind, owner_user_id, name, sort_order, allow_advance, max_advance_cents)
-   VALUES ('acc_one', 'fam_main', 'personal', 'usr_one', ${q(USER1)}, 10, 1, NULL);`,
+   VALUES ('acc_one', 'fam_main', 'personal', 'usr_one', ${q(ACCOUNT1)}, 10, 1, NULL);`,
   `INSERT OR IGNORE INTO accounts (id, family_id, kind, owner_user_id, name, sort_order, allow_advance, max_advance_cents)
-   VALUES ('acc_two', 'fam_main', 'personal', 'usr_two', ${q(USER2)}, 20, 1, NULL);`,
+   VALUES ('acc_two', 'fam_main', 'personal', 'usr_two', ${q(ACCOUNT2)}, 20, 1, NULL);`,
   `INSERT OR IGNORE INTO accounts (id, family_id, kind, owner_user_id, name, sort_order, allow_advance, max_advance_cents)
    VALUES ('acc_joint', 'fam_main', 'joint', NULL, 'Joint', 30, 1, NULL);`,
 
@@ -110,7 +115,8 @@ const file = 'seed.generated.sql';
 writeFileSync(file, `${lines.join('\n\n')}\n`);
 
 console.log(`Seeding ${remote ? 'remote' : 'local'} database…`);
-console.log(`  ${USER1} and ${USER2}, ${(PERSONAL_CENTS / 100).toFixed(2)} each + ${(JOINT_CENTS / 100).toFixed(2)} joint, from ${PERIOD}`);
+console.log(`  ${USER1} (${ACCOUNT1}) and ${USER2} (${ACCOUNT2})`);
+console.log(`  ${(PERSONAL_CENTS / 100).toFixed(2)} each + ${(JOINT_CENTS / 100).toFixed(2)} joint, from ${PERIOD}`);
 
 execFileSync(
   'npx',
