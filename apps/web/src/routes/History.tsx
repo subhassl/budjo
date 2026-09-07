@@ -4,8 +4,8 @@ import {
   dateOf, formatCents, formatPeriod, nextPeriod, parseDollarsToCents, periodOf, prevPeriod,
 } from '@budjo/shared';
 import {
-  useAccounts, useDeleteLedgerEntry, useEditLedgerEntry, useLedger, useMe, useReference,
-  useVoidLedgerEntry,
+  useAccounts, useCardTotals, useDeleteLedgerEntry, useEditLedgerEntry, useLedger, useMe,
+  useReference, useVoidLedgerEntry,
 } from '../lib/hooks';
 import { Button, Card, Empty, ErrorNote, Field, Select, Spinner, TextInput } from '../components/ui';
 
@@ -37,6 +37,7 @@ export function History() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
+  const [view, setView] = useState<'entries' | 'cards'>('entries');
 
   const me = useMe();
   const accounts = useAccounts();
@@ -55,7 +56,9 @@ export function History() {
     : range === 'custom' ? { from: customFrom || undefined, to: customTo || undefined }
     : {};
 
-  const ledger = useLedger({ ...filters, accountId: accountId || undefined });
+  const scoped = { ...filters, accountId: accountId || undefined };
+  const ledger = useLedger(scoped);
+  const cardTotals = useCardTotals(scoped, view === 'cards');
 
   // Only take over the page on the very first load; afterwards the previous
   // results stay put and we just dim them while the new filter arrives.
@@ -137,6 +140,23 @@ export function History() {
         </div>
       ) : null}
 
+      <Pills
+        options={[
+          { value: 'entries', label: 'Entries' },
+          { value: 'cards', label: 'By card' },
+        ]}
+        value={view}
+        onChange={(v) => setView(v as 'entries' | 'cards')}
+      />
+
+      {view === 'cards' ? (
+        <ByCard
+          totals={cardTotals.data?.totals ?? []}
+          cards={reference.data?.cards ?? []}
+          loading={cardTotals.isLoading}
+        />
+      ) : (
+      <>
       {isAdmin ? (
         <p className="muted px-1 text-xs">Tap an entry to edit or correct it.</p>
       ) : null}
@@ -211,6 +231,8 @@ export function History() {
           {ledger.isFetchingNextPage ? 'Loading…' : 'Load older entries'}
         </Button>
       ) : null}
+      </>
+      )}
 
       {editing ? (
         <EditSheet
@@ -233,6 +255,67 @@ export function History() {
  * is visible and one tap away, and the current filter is readable without
  * opening anything — a dropdown hides both.
  */
+/**
+ * What went on each card under the current filters — the number to hold up
+ * against a statement. Includes the close and due days, since the question is
+ * usually "does this month's Amex match?" rather than "what did I spend".
+ */
+function ByCard({
+  totals, cards, loading,
+}: {
+  totals: { cardId: string | null; spentCents: number; entries: number }[];
+  cards: { id: string; name: string; last4: string | null; statementCloseDay: number | null; dueDay: number | null }[];
+  loading: boolean;
+}) {
+  if (loading) return <Spinner />;
+
+  const withSpend = totals.filter((t) => t.spentCents !== 0);
+  if (withSpend.length === 0) return <Empty>Nothing on any card in this range.</Empty>;
+
+  const total = withSpend.reduce((sum, t) => sum + t.spentCents, 0);
+  const ordinal = (day: number) => {
+    const suffix = day % 10 === 1 && day !== 11 ? 'st'
+      : day % 10 === 2 && day !== 12 ? 'nd'
+      : day % 10 === 3 && day !== 13 ? 'rd' : 'th';
+    return `${day}${suffix}`;
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Card className="divide-y divide-[var(--border)] overflow-hidden">
+        {withSpend.map((row) => {
+          const card = cards.find((c) => c.id === row.cardId);
+          const detail = [
+            card?.last4 ? `••${card.last4}` : null,
+            card?.statementCloseDay ? `closes ${ordinal(card.statementCloseDay)}` : null,
+            card?.dueDay ? `due ${ordinal(card.dueDay)}` : null,
+          ].filter(Boolean).join(' · ');
+
+          return (
+            <div key={row.cardId ?? 'none'} className="flex items-center justify-between px-4 py-3.5">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">
+                  {card?.name ?? 'No card recorded'}
+                </div>
+                <div className="muted truncate text-xs">
+                  {row.entries} {row.entries === 1 ? 'entry' : 'entries'}
+                  {detail ? ` · ${detail}` : ''}
+                </div>
+              </div>
+              <div className="tnum shrink-0 pl-3 font-medium">{formatCents(row.spentCents)}</div>
+            </div>
+          );
+        })}
+      </Card>
+
+      <div className="flex items-baseline justify-between px-1">
+        <span className="muted text-xs">Total across cards</span>
+        <span className="tnum text-sm font-semibold">{formatCents(total)}</span>
+      </div>
+    </div>
+  );
+}
+
 function Pills({
   options, value, onChange,
 }: {

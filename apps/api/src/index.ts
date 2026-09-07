@@ -11,6 +11,7 @@ import { moneyRoutes } from './routes/money';
 import { spendCheckRoutes } from './routes/spendChecks';
 import { getFamily } from './db/repo';
 import { runMaintenance } from './services/maintenance';
+import { runBackup } from './services/backup';
 import { isProduction } from './env';
 
 const app = new Hono<AppEnv>();
@@ -72,13 +73,32 @@ app.all('*', async (c) => {
 export default {
   fetch: app.fetch,
 
-  /** Daily: allocate the month, repay due advances, expire stale holds. */
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  /**
+   * Daily: allocate the month, repay due advances, expire stale holds.
+   * Weekly: snapshot the database to R2.
+   *
+   * The backup runs after maintenance and its failure is swallowed, because an
+   * unavailable bucket must never stop anyone's allocation being posted.
+   */
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       (async () => {
         const family = await getFamily(env.DB);
         const result = await runMaintenance(env.DB, family);
         console.log('maintenance', JSON.stringify(result));
+
+        const weekly = event.cron === '0 7 * * SUN';
+        if (weekly) {
+          if (!env.BACKUPS) {
+            console.warn('backup skipped: no R2 bucket bound');
+            return;
+          }
+          try {
+            console.log('backup', JSON.stringify(await runBackup(env.DB, env.BACKUPS)));
+          } catch (err) {
+            console.error('backup failed', err);
+          }
+        }
       })(),
     );
   },

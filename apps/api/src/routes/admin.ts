@@ -13,6 +13,7 @@ import {
 } from '../domain/ledgerEdits';
 import { auditInsert, ledgerInsert } from '../services/ledger';
 import { runMaintenance } from '../services/maintenance';
+import { runBackup } from '../services/backup';
 import { listAccountAccess, listAccounts, listCards, listCategories, listUsers } from '../db/repo';
 import { badRequest, conflict, notFound } from '../lib/http';
 import { hashCode, newId, newInviteCode } from '../lib/ids';
@@ -670,6 +671,25 @@ adminRoutes.get('/export', async (c) => {
     accounts: accounts.results,
     ledgerEntries: ledger.results,
     spendChecks: checks.results,
+  });
+});
+
+/** Snapshot to R2 on demand, and list what snapshots exist. */
+adminRoutes.post('/backup', async (c) => {
+  if (!c.env.BACKUPS) {
+    throw conflict('Backups are not switched on yet — R2 needs enabling on the account');
+  }
+  return c.json(await runBackup(c.env.DB, c.env.BACKUPS));
+});
+
+adminRoutes.get('/backups', async (c) => {
+  if (!c.env.BACKUPS) return c.json({ enabled: false, snapshots: [] });
+  const listed = await c.env.BACKUPS.list({ prefix: 'snapshots/' });
+  return c.json({
+    enabled: true,
+    snapshots: listed.objects
+      .map((o) => ({ key: o.key, size: o.size, uploadedAt: o.uploaded }))
+      .sort((a, b) => (a.key < b.key ? 1 : -1)),
   });
 });
 

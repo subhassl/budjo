@@ -275,12 +275,23 @@ export async function settleSpendCheck(
   return (await getSpendCheck(db, checkId))!;
 }
 
+/**
+ * Also accepts an expired check. A check whose hold timed out is still shown on
+ * the home screen asking whether the money was spent, so "no, I didn't" has to
+ * be answerable — otherwise the only way to clear it would be to record a spend
+ * that never happened.
+ */
 export async function cancelSpendCheck(db: D1Database, checkId: string): Promise<SpendCheck> {
   const check = await getSpendCheck(db, checkId);
   if (!check) throw notFound('No such spend check');
-  if (check.status !== 'pending') throw conflict(`This check is already ${check.status}`);
+  if (check.status !== 'pending' && check.status !== 'expired') {
+    throw conflict(`This check is already ${check.status}`);
+  }
   await db
-    .prepare(`UPDATE spend_checks SET status = 'cancelled' WHERE id = ? AND status = 'pending'`)
+    .prepare(
+      `UPDATE spend_checks SET status = 'cancelled'
+        WHERE id = ? AND status IN ('pending','expired')`,
+    )
     .bind(checkId)
     .run();
   return (await getSpendCheck(db, checkId))!;
@@ -353,17 +364,30 @@ export async function listChecksForAccounts(
   db: D1Database,
   accountIds: readonly string[],
   statuses: readonly string[],
-  limit = 50,
+  opts: { limit?: number; maxAgeDays?: number } = {},
 ): Promise<SpendCheck[]> {
   if (accountIds.length === 0) return [];
+  const { limit = 50, maxAgeDays } = opts;
+
+  const clauses = [
+    `account_id IN (${accountIds.map(() => '?').join(',')})`,
+    `status IN (${statuses.map(() => '?').join(',')})`,
+  ];
+  const binds: unknown[] = [...accountIds, ...statuses];
+
+  // Keeps a forgotten check from six months ago off the home screen while it
+  // still shows the ones you might plausibly remember.
+  if (maxAgeDays !== undefined) {
+    clauses.push('created_at >= ?');
+    binds.push(new Date(Date.now() - maxAgeDays * 86_400_000).toISOString());
+  }
+
   const { results } = await db
     .prepare(
-      `SELECT * FROM spend_checks
-        WHERE account_id IN (${accountIds.map(() => '?').join(',')})
-          AND status IN (${statuses.map(() => '?').join(',')})
+      `SELECT * FROM spend_checks WHERE ${clauses.join(' AND ')}
         ORDER BY created_at DESC LIMIT ?`,
     )
-    .bind(...accountIds, ...statuses, limit)
+    .bind(...binds, limit)
     .all<SpendCheckRow>();
   return results.map(toSpendCheck);
 }

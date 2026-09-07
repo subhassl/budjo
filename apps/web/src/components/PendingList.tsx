@@ -24,19 +24,47 @@ export function PendingList({
   const nameFor = (accountId: string) =>
     accounts.find((a) => a.accountId === accountId)?.account.name ?? '';
 
+  const held = mine.filter((c) => c.status === 'pending');
+  const lapsed = mine.filter((c) => c.status === 'expired');
+
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="muted px-1 text-xs font-medium tracking-wide uppercase">
-        Waiting to be settled
-      </h2>
-      {mine.map((check) => (
-        <PendingRow key={check.id} check={check} accountName={nameFor(check.accountId)} />
-      ))}
-    </section>
+    <>
+      {lapsed.length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="px-1 text-xs font-medium tracking-wide text-amber-500 uppercase">
+            Did you spend this?
+          </h2>
+          <p className="muted px-1 text-xs">
+            The hold ran out. If you spent it, settle it — until you do it is not
+            counted against your balance.
+          </p>
+          {lapsed.map((check) => (
+            <PendingRow key={check.id} check={check} accountName={nameFor(check.accountId)} lapsed />
+          ))}
+        </section>
+      ) : null}
+
+      {held.length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="muted px-1 text-xs font-medium tracking-wide uppercase">
+            Waiting to be settled
+          </h2>
+          {held.map((check) => (
+            <PendingRow key={check.id} check={check} accountName={nameFor(check.accountId)} />
+          ))}
+        </section>
+      ) : null}
+    </>
   );
 }
 
-function PendingRow({ check, accountName }: { check: SpendCheck; accountName: string }) {
+function PendingRow({
+  check, accountName, lapsed = false,
+}: {
+  check: SpendCheck;
+  accountName: string;
+  lapsed?: boolean;
+}) {
   const settle = useSettleCheck();
   const cancel = useCancelCheck();
   const [actual, setActual] = useState('');
@@ -45,15 +73,22 @@ function PendingRow({ check, accountName }: { check: SpendCheck; accountName: st
     0,
     Math.round((Date.parse(check.expiresAt) - Date.now()) / 3_600_000),
   );
+  const daysAgo = Math.max(
+    0,
+    Math.floor((Date.now() - Date.parse(check.createdAt)) / 86_400_000),
+  );
 
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <Card className={`flex flex-col gap-3 p-4 ${lapsed ? 'border-amber-500/40' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="tnum text-lg font-semibold">{formatCents(check.estimatedCents)}</div>
           <div className="muted truncate text-xs">
             {accountName}
-            {check.merchant ? ` · ${check.merchant}` : ''} · {hoursLeft}h left
+            {check.merchant ? ` · ${check.merchant}` : ''}
+            {lapsed
+              ? ` · ${daysAgo === 0 ? 'today' : `${daysAgo}d ago`}`
+              : ` · ${hoursLeft}h left`}
           </div>
         </div>
         <button

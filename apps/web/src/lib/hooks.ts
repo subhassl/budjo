@@ -25,10 +25,15 @@ export const useReference = () =>
     staleTime: 5 * 60_000,
   });
 
+/**
+ * Held checks *and* ones whose hold timed out. An expired check still needs
+ * answering: the money was probably spent, and settling is what writes it to
+ * the ledger. Dropping it from view is how a real spend goes unrecorded.
+ */
 export const usePendingChecks = () =>
   useQuery({
-    queryKey: ['checks', 'pending'],
-    queryFn: () => api<{ checks: SpendCheck[] }>('/spend-checks?status=pending'),
+    queryKey: ['checks', 'open'],
+    queryFn: () => api<{ checks: SpendCheck[] }>('/spend-checks?status=pending,expired'),
   });
 
 export const useRecentChecks = () =>
@@ -172,6 +177,24 @@ export const useAdminOverview = (enabled: boolean) =>
     queryKey: ['admin', 'overview'],
     queryFn: () => api<AdminOverview>('/admin/overview'),
     enabled,
+  });
+
+export interface CardTotal { cardId: string | null; spentCents: number; entries: number }
+
+export const useCardTotals = (filters: LedgerFilters, enabled: boolean) =>
+  useQuery({
+    queryKey: ['reports', 'by-card', filters],
+    enabled,
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (filters.accountId) params.set('account', filters.accountId);
+      if (filters.periodFrom) params.set('periodFrom', filters.periodFrom);
+      if (filters.periodTo) params.set('periodTo', filters.periodTo);
+      if (filters.from) params.set('from', filters.from);
+      if (filters.to) params.set('to', filters.to);
+      const qs = params.toString();
+      return api<{ totals: CardTotal[] }>(`/reports/by-card${qs ? `?${qs}` : ''}`);
+    },
   });
 
 export function useEditLedgerEntry() {

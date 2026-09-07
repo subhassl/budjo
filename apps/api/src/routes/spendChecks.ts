@@ -47,7 +47,8 @@ spendCheckRoutes.get('/spend-checks', async (c) => {
     ? ['pending', 'settled', 'cancelled', 'expired', 'denied']
     : status.split(',');
   const accountIds = visibleAccounts(ctx).map((a) => a.id);
-  const checks = await listChecksForAccounts(c.env.DB, accountIds, statuses);
+  const checks = await listChecksForAccounts(c.env.DB, accountIds, statuses,
+    status === 'all' ? {} : { maxAgeDays: 30 });
   return c.json({ checks });
 });
 

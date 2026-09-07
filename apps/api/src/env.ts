@@ -4,6 +4,12 @@ import type { AccessContext } from './domain/access';
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  /**
+   * Optional. Absent until R2 is enabled on the account and the binding is
+   * uncommented in wrangler.toml. Deliberately optional so that a missing
+   * bucket cannot break the cron that also posts the monthly allocation.
+   */
+  BACKUPS?: R2Bucket;
   SESSION_SECRET: string;
   APP_NAME?: string;
   /**

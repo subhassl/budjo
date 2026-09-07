@@ -11,6 +11,7 @@ import type { AppEnv } from '../env';
 import { badRequest, forbidden, unauthorized } from '../lib/http';
 import { isProduction } from '../env';
 import { hashCode, newId, timingSafeEqual } from '../lib/ids';
+import { clientIdFor, enforceThrottle } from '../lib/throttle';
 import { nowIso } from '../lib/time';
 import {
   challengeCookie, clearChallengeCookie, clearSessionCookie, challengeCookieName,
@@ -72,6 +73,9 @@ authRoutes.get('/bootstrap', async (c) => {
 });
 
 authRoutes.post('/passkey/register/options', async (c) => {
+  await enforceThrottle(c.env.DB, { name: 'register', limit: 10, windowSeconds: 600 },
+    clientIdFor(c.req.raw.headers));
+
   const body: { code?: string; userId?: string } =
     await c.req.json<{ code?: string; userId?: string }>().catch(() => ({}));
   const { rpID, secure } = rp(c);
@@ -85,9 +89,13 @@ authRoutes.post('/passkey/register/options', async (c) => {
       .prepare(`SELECT id, user_id, code_hash, expires_at, used_at FROM invites WHERE code_hash = ?`)
       .bind(codeHash)
       .first<{ id: string; user_id: string; code_hash: string; expires_at: string; used_at: string | null }>();
-    if (!invite || !timingSafeEqual(invite.code_hash, codeHash)) throw forbidden('That invite code is not valid');
-    if (invite.used_at) throw forbidden('That invite code has already been used');
-    if (invite.expires_at <= nowIso()) throw forbidden('That invite code has expired');
+    // Deliberately one message for invalid, spent and expired alike: telling
+    // them apart confirms a correct guess to anyone probing.
+    const unusable = !invite
+      || !timingSafeEqual(invite.code_hash, codeHash)
+      || Boolean(invite.used_at)
+      || invite.expires_at <= nowIso();
+    if (unusable || !invite) throw forbidden('That invite code is not valid');
     userId = invite.user_id;
     inviteId = invite.id;
   } else if ((await credentialCount(c.env.DB)) === 0 && body.userId) {
@@ -205,6 +213,8 @@ authRoutes.post('/passkey/login/options', async (c) => {
 });
 
 authRoutes.post('/passkey/login/verify', async (c) => {
+  await enforceThrottle(c.env.DB, { name: 'login', limit: 20, windowSeconds: 600 },
+    clientIdFor(c.req.raw.headers));
   const { origin, rpID, secure } = rp(c);
   const token = readCookie(c.req.header('Cookie'), challengeCookieName);
   if (!token) throw unauthorized('Sign-in timed out — try again');

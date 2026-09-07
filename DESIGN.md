@@ -342,7 +342,7 @@ Missed months (app down for a while) are backfilled: the job walks from the last
 
 Cloudflare wins on: genuinely $0 at our volume, no idle-suspend, cron and static assets included, single vendor, fast edge PWA. The main constraint is D1's SQLite feature set, which is more than enough for this schema. The only real cost is a domain (~$10/yr, optional — `*.workers.dev` works).
 
-**Backups:** a weekly cron exports D1 to **R2** (10GB free) as SQL, keeping 12 weeks, plus a manual "Export CSV/JSON" button in admin. This is a financial record; losing it to a bad migration is the worst realistic failure mode.
+**Backups:** a weekly cron (Sunday 07:00 UTC) snapshots every table to **R2** as JSON, keeping 12 weeks, plus a manual "Export CSV/JSON" button in admin. The R2 binding is optional at runtime and the backup's failure is swallowed, so an unavailable bucket can never stop the same cron posting the monthly allocation. This is a financial record; losing it to a bad migration is the worst realistic failure mode.
 
 ### 6.2 Stack
 
@@ -506,7 +506,7 @@ A member (child) sees only their own card and the primary actions.
 
 - No financial credentials, no card numbers (optional last-4 only), no bank connections. The blast radius of a breach is "someone learns we spent $42 on dinner."
 - Passkeys mean no password database.
-- Invite-only registration; Workers rate limiting on auth routes.
+- Invite-only registration, with a fixed-window rate limit on the auth routes kept in D1 (10 registration attempts and 20 sign-ins per IP per 10 minutes). Invite codes are 8 characters over a 34-symbol alphabet — about 40 bits, drawn by rejection sampling rather than a biased modulo — single-use and 14-day. A rejected code always gets the same message, since distinguishing invalid from spent would confirm a correct guess.
 - **Access is enforced server-side on every route**, never by hiding UI. The member role only means something if the API refuses — this is the thing most likely to be got wrong once kids exist, so it's tested directly (§11).
 - All money mutations write to `audit_log` with actor and before/after — the primary accountability mechanism, since all adults are admins.
 - HTTPS only, `HttpOnly`/`Secure`/`SameSite` cookies, CSRF token on state-changing requests, strict CSP.

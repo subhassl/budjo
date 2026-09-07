@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { assertCanView, visibleAccounts } from '../domain/access';
-import { listLedger } from '../db/repo';
+import { getCardTotals, listLedger } from '../db/repo';
 
 export const ledgerRoutes = new Hono<AppEnv>();
 
@@ -37,4 +37,29 @@ ledgerRoutes.get('/ledger', async (c) => {
   });
 
   return c.json(page);
+});
+
+/** Per-card totals under the same filters as the ledger list. */
+ledgerRoutes.get('/reports/by-card', async (c) => {
+  const ctx = c.get('access');
+  const requested = c.req.query('account');
+
+  let accountIds: string[];
+  if (requested) {
+    assertCanView(ctx, requested);
+    accountIds = [requested];
+  } else {
+    accountIds = visibleAccounts(ctx).map((a) => a.id);
+  }
+
+  const to = c.req.query('to');
+  const totals = await getCardTotals(c.env.DB, {
+    accountIds,
+    periodFrom: c.req.query('periodFrom'),
+    periodTo: c.req.query('periodTo'),
+    from: c.req.query('from'),
+    to: to && /^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999Z` : to,
+  });
+
+  return c.json({ totals });
 });

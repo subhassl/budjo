@@ -4,6 +4,7 @@ import { getAllocationRules, getLastAllocatedPeriods, getOpenAdvances, listAccou
 import { ledgerInsert } from './ledger';
 import { newId } from '../lib/ids';
 import { nowIso } from '../lib/time';
+import { pruneThrottleBuckets } from '../lib/throttle';
 
 export interface MaintenanceResult {
   allocationsPosted: number;
@@ -95,6 +96,8 @@ export async function runMaintenance(
   }
 
   statements.push(db.prepare('UPDATE family SET last_maintenance_at = ? WHERE id = ?').bind(iso, family.id));
+
+  await pruneThrottleBuckets(db, now);
 
   if (statements.length > 0) await db.batch(statements);
 

@@ -319,3 +319,46 @@ export async function listLedger(db: D1Database, q: LedgerQuery): Promise<{ entr
     nextCursor: hasMore && last ? `${last.occurred_at}|${last.id}` : null,
   };
 }
+
+export interface CardTotal {
+  cardId: string | null;
+  spentCents: number;
+  entries: number;
+}
+
+/**
+ * What went on each card, for reconciling a statement against what was logged.
+ * Counts spends and refunds, plus corrections that reverse one, so an edited
+ * entry does not show up twice.
+ */
+export async function getCardTotals(
+  db: D1Database,
+  q: { accountIds: readonly string[]; periodFrom?: string; periodTo?: string; from?: string; to?: string },
+): Promise<CardTotal[]> {
+  if (q.accountIds.length === 0) return [];
+
+  const clauses = [
+    `account_id IN (${q.accountIds.map(() => '?').join(',')})`,
+    `(type IN ('spend','refund')
+      OR (type = 'void' AND voids_entry_id IN
+          (SELECT id FROM ledger_entries WHERE type IN ('spend','refund'))))`,
+  ];
+  const binds: unknown[] = [...q.accountIds];
+  if (q.periodFrom) { clauses.push('period >= ?'); binds.push(q.periodFrom); }
+  if (q.periodTo) { clauses.push('period <= ?'); binds.push(q.periodTo); }
+  if (q.from) { clauses.push('occurred_at >= ?'); binds.push(q.from); }
+  if (q.to) { clauses.push('occurred_at <= ?'); binds.push(q.to); }
+
+  const { results } = await db
+    .prepare(
+      `SELECT card_id, COALESCE(SUM(amount_cents), 0) AS net, COUNT(*) AS n
+         FROM ledger_entries WHERE ${clauses.join(' AND ')}
+        GROUP BY card_id`,
+    )
+    .bind(...binds)
+    .all<{ card_id: string | null; net: number; n: number }>();
+
+  return results
+    .map((r) => ({ cardId: r.card_id, spentCents: -r.net, entries: r.n }))
+    .sort((a, b) => b.spentCents - a.spentCents);
+}

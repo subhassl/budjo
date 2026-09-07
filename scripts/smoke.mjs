@@ -418,5 +418,69 @@ ok('the next page does not repeat the first',
 ok('a member still cannot widen the filter to another account',
    (await call(kidCookie, `/ledger?account=acc_joint&periodFrom=${curPeriod}&periodTo=${curPeriod}`)).status === 404);
 
+console.log('\n19. A forgotten check must not vanish');
+const forgotten = await call(cookie, '/spend-checks', 'POST',
+  { accountId: 'acc_joint', estimatedCents: 4500, merchant: 'Forgot to settle' });
+ok('check created', forgotten.body.check?.status === 'pending');
+
+// Age it past its hold, then run the sweep exactly as the daily cron would.
+sql(`UPDATE spend_checks SET expires_at = '2020-01-01T00:00:00.000Z' WHERE id = '${forgotten.body.check.id}'`);
+await call(cookie, '/admin/maintenance', 'POST');
+
+const swept = (await call(cookie, '/spend-checks?status=all')).body.checks
+  .find((c) => c.id === forgotten.body.check.id);
+ok('the sweep marks it expired', swept?.status === 'expired', `status ${swept?.status}`);
+
+const openList = (await call(cookie, '/spend-checks?status=pending,expired')).body.checks;
+ok('but it is still surfaced, not lost',
+   openList.some((c) => c.id === forgotten.body.check.id),
+   `${openList.length} open checks`);
+
+const settledLate = await call(cookie, `/spend-checks/${forgotten.body.check.id}/settle`, 'POST',
+  { actualCents: 4500 });
+ok('and can still be settled after expiring', settledLate.body.check?.status === 'settled');
+
+const forgotten2 = await call(cookie, '/spend-checks', 'POST',
+  { accountId: 'acc_joint', estimatedCents: 900, merchant: 'Never spent' });
+sql(`UPDATE spend_checks SET status = 'expired' WHERE id = '${forgotten2.body.check.id}'`);
+ok('an expired check can also be dismissed as never spent',
+   (await call(cookie, `/spend-checks/${forgotten2.body.check.id}/cancel`, 'POST'))
+     .body.check?.status === 'cancelled');
+
+console.log('\n20. Per-card reconciliation');
+const byCard = await call(cookie, '/reports/by-card');
+ok('returns totals per card', Array.isArray(byCard.body.totals) && byCard.body.totals.length > 0,
+   JSON.stringify(byCard.body).slice(0, 120));
+const amex = byCard.body.totals.find((t) => t.cardId === 'crd_amex_gold');
+ok('the Amex total is positive spend', amex && amex.spentCents > 0, JSON.stringify(amex));
+const scopedCard = await call(cookie, `/reports/by-card?account=acc_joint&periodFrom=${curPeriod}&periodTo=${curPeriod}`);
+ok('it honours the same filters as the ledger', Array.isArray(scopedCard.body.totals));
+ok('a member cannot read another account’s card totals',
+   (await call(kidCookie, '/reports/by-card?account=acc_joint')).status === 404);
+
+console.log('\n21. Auth rate limiting');
+let limited = 0;
+for (let i = 0; i < 14; i++) {
+  const r = await fetch(`${BASE}/auth/passkey/register/options`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.9' },
+    body: JSON.stringify({ code: 'AAAA-BBBB' }),
+  });
+  if (r.status === 429) limited++;
+}
+ok('repeated invite guesses get throttled', limited > 0, `${limited} of 14 rejected with 429`);
+
+const other = await fetch(`${BASE}/auth/passkey/register/options`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.4' },
+  body: JSON.stringify({ code: 'AAAA-BBBB' }),
+});
+ok('a different caller is unaffected', other.status !== 429, `status ${other.status}`);
+
+const bad = await (await fetch(`${BASE}/auth/passkey/register/options`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.5' },
+  body: JSON.stringify({ code: 'ZZZZ-9999' }),
+})).json();
+ok('a wrong code says only that it is not valid',
+   bad.error === 'That invite code is not valid', JSON.stringify(bad));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

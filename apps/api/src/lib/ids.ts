@@ -1,10 +1,26 @@
 const ALPHABET = '0123456789abcdefghijkmnpqrstuvwxyz'; // no l/o, easier to read aloud
 
+/**
+ * Rejection sampling rather than `byte % 34`.
+ *
+ * 256 is not a multiple of 34, so a plain modulo makes 18 of the 34 symbols
+ * likelier than the other 16 — worth about 0.7 bits out of 40 on an invite
+ * code. Immaterial against a real attacker, but a biased generator is the kind
+ * of thing that is quietly wrong for years, and discarding the ragged tail of
+ * the byte range costs nothing.
+ */
 function randomString(length: number): string {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
+  const limit = 256 - (256 % ALPHABET.length); // 238: the largest unbiased span
   let out = '';
-  for (const byte of bytes) out += ALPHABET[byte % ALPHABET.length];
+  while (out.length < length) {
+    const bytes = new Uint8Array(length - out.length + 8);
+    crypto.getRandomValues(bytes);
+    for (const byte of bytes) {
+      if (byte >= limit) continue;
+      out += ALPHABET[byte % ALPHABET.length];
+      if (out.length === length) break;
+    }
+  }
   return out;
 }
 
