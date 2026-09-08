@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom';
 import type { AccountSummary } from '@budjo/shared';
-import { formatCents, formatPeriod } from '@budjo/shared';
-import { useAccounts, useMe, usePendingChecks } from '../lib/hooks';
+import {
+  daysUntilDayOfMonth, describeDaysUntil, formatCents, formatPeriod,
+} from '@budjo/shared';
+import { useAccounts, useMe, usePendingChecks, useReference } from '../lib/hooks';
 import { Button, Card, Disclosure, ErrorNote, Hint, Spinner } from '../components/ui';
 import { PendingList } from '../components/PendingList';
 
@@ -9,6 +11,7 @@ export function Home() {
   const me = useMe();
   const accounts = useAccounts();
   const pending = usePendingChecks();
+  const reference = useReference();
 
   if (accounts.isLoading || me.isLoading) return <Spinner />;
   if (accounts.isError) return <ErrorNote error={accounts.error} />;
@@ -32,6 +35,11 @@ export function Home() {
           ))}
         </Card>
       ) : null}
+
+      <StatementReminders
+        cards={reference.data?.cards ?? []}
+        timezone={me.data?.family.timezone ?? 'UTC'}
+      />
 
       <div className="mt-2 flex flex-col gap-2">
         <Link to="/check">
@@ -115,6 +123,43 @@ function PrimaryAccount({ summary }: { summary: AccountSummary }) {
           it opens at {formatCents(summary.nextPeriodOpeningCents)}.
         </p>
       ) : null}
+    </Card>
+  );
+}
+
+/**
+ * Which statements are about to close, so a purchase can be timed either side
+ * of one. Silent unless a card has a close day set and it is within a week —
+ * a permanent list of six cards would be noise.
+ */
+function StatementReminders({
+  cards, timezone,
+}: {
+  cards: { id: string; name: string; statementCloseDay: number | null }[];
+  timezone: string;
+}) {
+  const now = new Date();
+  const soon = cards
+    .filter((card) => card.statementCloseDay !== null)
+    .map((card) => ({
+      name: card.name,
+      days: daysUntilDayOfMonth(card.statementCloseDay!, now, timezone),
+    }))
+    .filter((card) => card.days <= 7)
+    .sort((a, b) => a.days - b.days);
+
+  if (soon.length === 0) return null;
+
+  return (
+    <Card className="flex flex-col gap-1 p-4">
+      {soon.map((card) => (
+        <div key={card.name} className="flex items-baseline justify-between text-xs">
+          <span>{card.name} closes</span>
+          <span className={card.days <= 1 ? 'text-amber-500' : 'muted'}>
+            {describeDaysUntil(card.days)}
+          </span>
+        </div>
+      ))}
     </Card>
   );
 }

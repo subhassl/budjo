@@ -698,5 +698,43 @@ ok('a member cannot manage categories',
    (await call(kidCookie, '/admin/categories', 'POST', { name: 'Sweets', icon: '🍬' })).status === 403
    && (await call(kidCookie, '/admin/card-rules/cat_dining', 'DELETE')).status === 403);
 
+console.log('\n26. Passkeys and sessions');
+const pk = await call(cookie, '/me/passkeys');
+ok('you can see your own passkeys', pk.status === 200 && Array.isArray(pk.body.passkeys),
+   JSON.stringify(pk.body).slice(0, 100));
+ok('and how many devices are signed in', typeof pk.body.activeSessions === 'number');
+
+// Seeded databases have none; add two so the guard can be exercised properly.
+const now = new Date().toISOString();
+sql(`INSERT INTO credentials (id, user_id, credential_id, public_key, counter, nickname, created_at)
+     VALUES ('cred_a', 'usr_one', 'cid-a', 'k', 0, 'Phone', '${now}')`);
+const oneKey = await call(cookie, '/me/passkeys');
+ok('the list reflects what is registered', oneKey.body.passkeys.length === 1,
+   `${oneKey.body.passkeys.length}`);
+
+// Removing your only passkey would lock you out with no way back.
+ok('your last passkey cannot be removed',
+   (await call(cookie, '/me/passkeys/cred_a', 'DELETE')).status === 409);
+
+sql(`INSERT INTO credentials (id, user_id, credential_id, public_key, counter, nickname, created_at)
+     VALUES ('cred_b', 'usr_one', 'cid-b', 'k', 0, 'Laptop', '${now}')`);
+ok('a second one can be removed',
+   (await call(cookie, '/me/passkeys/cred_b', 'DELETE')).status === 200
+   && (await call(cookie, '/me/passkeys')).body.passkeys.length === 1);
+
+ok('you cannot remove someone else’s passkey',
+   (await call(kidCookie, '/me/passkeys/cred_a', 'DELETE')).status === 409
+   || (await call(kidCookie, '/me/passkeys')).body.passkeys.length === 0);
+
+// Signing out other devices must not sign out the device asking.
+const extraSession = 'ses_extra_probe';
+sql(`INSERT OR REPLACE INTO sessions (id,user_id,expires_at,created_at)
+     VALUES ('${extraSession}','usr_one','${new Date(Date.now() + 864e5).toISOString()}','${now}')`);
+const revoked = await call(cookie, '/me/sessions/revoke-others', 'POST');
+ok('other devices are signed out', revoked.body.revoked >= 1, JSON.stringify(revoked.body));
+ok('but this one stays signed in', (await call(cookie, '/me')).status === 200);
+
+sql(`DELETE FROM credentials WHERE id IN ('cred_a','cred_b')`);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

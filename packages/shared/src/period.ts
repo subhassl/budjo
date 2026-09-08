@@ -102,3 +102,32 @@ export function periodFromDate(date: string): Period {
 export function occurredAtFor(date: string, timeZone: string, now = new Date()): string {
   return date === dateOf(now, timeZone) ? now.toISOString() : `${date}T12:00:00.000Z`;
 }
+
+/**
+ * Days until a card's statement closes, given the day-of-month it closes on.
+ *
+ * Months are not the same length, so a card that closes on the 31st has to mean
+ * "the last day" in February — otherwise the reminder would silently never fire
+ * in short months.
+ */
+export function daysUntilDayOfMonth(closeDay: number, now: Date, timeZone: string): number {
+  const today = dateOf(now, timeZone);
+  const [year, month, day] = today.split('-').map(Number) as [number, number, number];
+
+  const lengthOf = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+  const thisMonth = Math.min(closeDay, lengthOf(year, month));
+  if (thisMonth >= day) return thisMonth - day;
+
+  // Already past it this month — count on to next month's occurrence.
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const inNext = Math.min(closeDay, lengthOf(nextYear, nextMonth));
+  return lengthOf(year, month) - day + inNext;
+}
+
+export function describeDaysUntil(days: number): string {
+  if (days === 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  return `in ${days} days`;
+}

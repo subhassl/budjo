@@ -1,6 +1,6 @@
 # Budjo — Design Document
 
-**Status:** v0.4 — Phase 1 implemented; reconciled with the code
+**Status:** v0.5 — live at budjo.theserenelifestyle.com; reconciled with the code
 **Last updated:** 2026-09-07
 
 ---
@@ -45,7 +45,7 @@ Budjo puts the limit *above* the cards instead of inside them. It tracks a per-p
 |---|---|---|---|
 | Adult A | personal | Adult A | $200 |
 | Adult B | personal | Adult B | $200 |
-| Joint | joint | Both of us | $200 |
+| Joint | joint | Both of us | $300 |
 
 **Every amount here is editable in the admin panel**, per account, effective from a chosen month. $200/$200/$200 is a starting point, not a constant in the code.
 
@@ -173,14 +173,22 @@ The one thing worth deciding before kids exist rather than after is whether thei
 
 SQLite (Cloudflare D1). **All money is stored as signed integer cents.** No floats anywhere, ever. Currency is USD only.
 
+Four migrations have been applied: `0001_init`, `0002_edit_window`,
+`0003_auth_throttle`, `0004_refunds`. The shape below is current.
+
 ```sql
 family(
   id, name, timezone TEXT DEFAULT 'America/Los_Angeles',
   currency TEXT DEFAULT 'USD',
   reserve_threshold_cents INTEGER DEFAULT 5000,   -- admin-editable
   hold_ttl_hours INTEGER DEFAULT 48,              -- admin-editable
+  edit_window_hours INTEGER DEFAULT 48,           -- admin-editable; 0 = always correct
+  last_maintenance_at,                            -- gates the lazy daily pass
   created_at
 )
+
+-- Fixed-window counter behind the auth rate limit (0003).
+auth_attempts(bucket_key PRIMARY KEY, attempts, window_start, expires_at)
 
 users(
   id, family_id, display_name, email,
@@ -264,6 +272,7 @@ ledger_entries(
   counterparty_account_id NULL,     -- transfers
   advance_id NULL,
   voids_entry_id NULL,              -- corrections point at what they reverse
+  refunds_entry_id NULL,            -- a return points at the purchase it came from
   note TEXT, occurred_at, created_by, created_at
 )
 CREATE UNIQUE INDEX ux_alloc ON ledger_entries(account_id, period)
@@ -416,8 +425,13 @@ POST   /api/transfer-requests/:id/{approve,decline}          # admins only
 POST   /api/transfers                # direct move out of an account you own
 POST   /api/advances                 { account_id, amount_cents }
 
-GET    /api/ledger?account&from&to&category&card&cursor
-POST   /api/refunds                  { ledger_entry_id, amount_cents }
+GET    /api/me/passkeys              → your devices + how many sessions are live
+DELETE /api/me/passkeys/:id          # refused if it is your last one
+POST   /api/me/sessions/revoke-others
+
+GET    /api/ledger?account&periodFrom&periodTo&from&to&category&card&cursor&limit
+GET    /api/reports/by-card?account&periodFrom&periodTo
+POST   /api/refunds                  { ledgerEntryId, amountCents, occurredOn?, note? }
 
 GET    /api/reports/{by-card,by-category}?period
 GET    /api/reports/trend?months=12
@@ -433,7 +447,13 @@ PATCH  /api/admin/family             # reserve threshold, hold TTL, timezone
 CRUD   /api/admin/{categories,cards,card-rules}
 POST   /api/admin/adjustments        { account_id, amount_cents, note }
 POST   /api/admin/void               { ledger_entry_id, reason }
-GET    /api/admin/export?format=csv|json
+POST   /api/admin/ledger/:id/edit    { ..., reason?, forceCorrection? }
+DELETE /api/admin/ledger/:id         # only inside the edit window
+DELETE /api/admin/card-rules/:categoryId
+POST   /api/admin/backup             # snapshot to R2 on demand
+GET    /api/admin/backups            # what snapshots exist
+POST   /api/admin/maintenance        # run the monthly job now
+GET    /api/admin/export?format=csv|json&periodFrom&periodTo
 GET    /api/admin/audit
 ```
 
@@ -482,22 +502,42 @@ A member (child) sees only their own card and the primary actions.
 
 ### Other screens
 
-- **Pending** — open checks, settle/cancel, hold time remaining.
+- ~~Pending~~ — folded into Home. A whole tab for a usually-empty list was a tab
+  you had to remember to check; the list now sits under the two action buttons,
+  beside the balance it affects. Checks whose hold has lapsed appear separately
+  under "Did you spend this?" rather than disappearing.
 - **History** — grouped by day, filterable by account/category/card/person, running balance shown.
 - **Requests** — incoming transfer requests to approve or decline (admins).
-- **Cards** — per-card month-to-date totals for statement reconciliation, close/due dates.
+- **History → By card** — per-card totals under the same filters as the entry
+  list, with close and due days. Reconciliation lives here rather than on its own
+  screen, so the account and date filters are shared.
 - **Insights** — 12-month trend, category breakdown, savings rate, biggest month.
 - **Admin** — members and roles, accounts with allocation amounts / advance caps / joint access, family settings, categories, cards + rules, adjustments, void, export, audit log.
-- **Settings** — theme, notifications, manage passkeys, install prompt.
+- **Settings** — your accounts, your passkeys (with the last one protected from
+  removal), sign out other devices, install prompt.
+
+**Layout.** History and Admin widen to 1024px on a large screen and the
+navigation moves from the bottom bar to a top bar; Home and the spend flow stay
+at phone width, because a single balance and two buttons stretched across a
+monitor reads worse rather than better.
 
 ---
 
 ## 9. PWA specifics
 
-- `display: standalone`, portrait, maskable icons, themed splash; installable on iOS and Android.
-- **Offline:** app shell precached. Balances and recent history cached in IndexedDB, shown with a "last synced 4:12pm" marker. Offline spend logging is queued with an idempotency key and replayed on reconnect.
+- `display: standalone`, portrait, maskable icon, themed splash; installable on
+  iOS and Android. The icon is an SVG, which iOS ignores for home-screen icons —
+  a PNG set is outstanding.
+- **Offline: not built yet.** The plan stands — precached shell, balances cached
+  and marked with a last-synced time, spend logging queued with an idempotency key
+  and replayed on reconnect. The idempotency layer it depends on is already in
+  place and used by every mutation.
   **Offline spend *checks* are explicitly provisional** — the server owns the balance, so an offline verdict is computed from the cached balance and clearly labeled. Doing otherwise would let two offline devices both approve the same dollars out of the joint pot.
-- **Push notifications** (Web Push + VAPID, free): transfer requests, settle reminders, spend alerts, monthly allocation, statement-close reminders. On iOS, push requires the PWA to be installed to the home screen.
+- **Push notifications: not built yet** (Web Push + VAPID, free): settle
+  reminders, transfer requests, spend alerts, and — the one with security value —
+  an alert when a new passkey is registered on your account. On iOS, push requires
+  the PWA to be installed to the home screen. Statement-close reminders *are*
+  built, but as a line on Home rather than a notification.
 - Update flow: service worker prompts "New version available — reload."
 
 ---
@@ -517,28 +557,48 @@ A member (child) sees only their own card and the primary actions.
 
 Two layers, both implemented.
 
-**Unit (77 tests, `npm test`).** The decision engine, allocation planner, period arithmetic, money parsing and access rules are pure functions, and are tested exhaustively: carry-forward across months, holds, the tight/denied boundary to the cent, settlement above estimate, advance caps, backfilled allocations, mid-year allocation changes, accounts created mid-year, and month boundaries across timezone and DST.
+**Unit (136 tests, `npm test`).** The decision engine, allocation planner, period arithmetic, money parsing and access rules are pure functions, and are tested exhaustively: carry-forward across months, holds, the tight/denied boundary to the cent, settlement above estimate, advance caps, backfilled allocations, mid-year allocation changes, accounts created mid-year, and month boundaries across timezone and DST.
 
 Access rules get their own suite asserting the negative cases explicitly: a member cannot read another member's ledger or spend from Joint without an access row, cannot take an advance when `allow_advance` is off, and cannot reach any admin route — and an admin cannot spend from an account they lack access to.
 
-**End-to-end (50 checks, `node scripts/smoke.mjs`).** Runs against a real Worker and a real D1 database: lazy allocation, holds, settlement, overdrawing settlement, denial and its remedies, transfers in every allowed and forbidden direction, advances and their cap, idempotent retries, voids, and every access rule above exercised over HTTP rather than in isolation.
+**End-to-end (159 checks, `node scripts/smoke.mjs`).** Runs against a real Worker and a real D1 database: lazy allocation, holds, settlement, overdrawing settlement, denial and its remedies, transfers in every allowed and forbidden direction, advances and their cap, idempotent retries, voids, and every access rule above exercised over HTTP rather than in isolation.
 
 ---
 
 ## 12. Roadmap
 
-**Phase 1 — Core (~2 weeks of evenings)**
-Schema + migrations · passkey auth · roles + access enforcement · three accounts · monthly allocation cron · balance API · spend check create/settle/cancel with holds · "spend from Joint instead" · direct transfers · home · history · admin (members, allocations, caps, categories, cards) · deploy to Cloudflare
+### Shipped
 
-**Phase 2 — Daily-driver polish**
-PWA install + offline shell · push notifications · transfer requests with approval · advances · card suggestion rules · per-card reconciliation view · refunds · CSV export · R2 backups
+**The core (Phase 1).** Passkey auth · roles and access enforcement · three
+accounts · monthly allocation with backfill · spend checks with holds, expiry and
+settlement · denial remedies · direct transfers · advances with per-account caps ·
+history · admin · deployed to Cloudflare on a custom domain.
 
-**Phase 3 — Nice to have**
-Insights and trends · savings goals ("saving for a $900 trip") · recurring/planned spends · receipt photos in R2 · home-screen widget via shortcut · optional fixed-expense tracking · kid-friendly simplified home screen
+**Since then.** Backdating a logged spend · editing history (in place inside a
+48-hour window, corrections after) · returns, partial or whole · full card and
+category management · History filters, paging and a per-card reconciliation view ·
+CSV and JSON export with names and dollars · weekly R2 snapshots with 12-week
+retention · auth rate limiting · statement-close reminders · passkey and session
+management · a desktop layout · in-context help for the check-and-settle flow.
 
-> **Sequencing note:** transfer requests and advances are the *only* remedies for a denied check besides switching to Joint. Phase 1 therefore includes direct transfers (you move your own money to the other adult), leaving only the request/approval/notification layer for Phase 2. Without that, a denial where Joint is also empty would be a dead end.
+### Not built yet
 
----
+**Push notifications.** The largest remaining gap, and it unlocks several things
+at once: settle reminders (which would stop a check lapsing in the first place),
+partner spend alerts, transfer requests, and an alarm when a new passkey is
+registered — currently nothing tells you that happened.
+
+**Transfer requests with approval.** The table exists and is unused. Two admins
+can already transfer directly, so this only becomes load-bearing when a child has
+an account and asking a parent is their only remedy for a denial.
+
+**Offline support.** The manifest makes the app installable; there is no service
+worker, so it needs a connection.
+
+**Smaller.** Refund of an entry from the by-card view · savings goals · recurring
+spends · receipt photos in R2 · insights and trends, which want a few months of
+real data before they say anything · a PNG icon set, since iOS ignores SVG for
+home-screen icons · wrangler 3 → 4.
 
 ## 13. Key decisions log
 
@@ -562,6 +622,11 @@ Insights and trends · savings goals ("saving for a $900 trip") · recurring/pla
 | Passkeys over passwords | Everyone's on a phone; fastest and safest option |
 | Cloudflare Workers + D1 | Only option that's truly $0 with no idle-suspend, plus cron and static assets in one deploy |
 | No bank/card API integration, ever | Honor system within the family; removes the largest complexity and risk surface |
+| **A fresh entry edits in place; an older one gets a correction** | A typo caught two minutes later should not leave three rows in history for one dinner. The audit log keeps the trail either way |
+| **A return is not a correction** | A void says it never happened; a refund says it happened and money came back. Only one of them can be partial, and both are true at once |
+| **Everything user-facing renders dates in the family timezone** | Slicing a UTC timestamp files an evening Pacific spend under tomorrow. Bitten twice: once in History, once in the CSV export |
+| **Month filters key on `period`, not timestamps** | Same reason, at the month boundary: a 7pm spend on the 30th is already next month in UTC |
+| **Holds are ignored once expired, everywhere they are summed** | Correctness never depends on the sweep job having run |
 
 ---
 
@@ -580,23 +645,41 @@ Insights and trends · savings goals ("saving for a $900 trip") · recurring/pla
 
 ## 15. Open questions
 
-### 15.1 Blocking (needed before deploy, not before I start building)
+Most of the original list has been answered by building and using the thing.
+What is left:
 
-1. **Display names and email addresses** for both accounts. Placeholders work until then; seeding is a one-line change.
+1. **The reserve threshold is family-wide.** A flat $50 "nearly out" warning is
+   right for a $200 allowance and meaningless for a $50 one — a child would see
+   amber on essentially every purchase. Either make it per-account or express it
+   as a percentage of the monthly allocation. Not worth changing until someone
+   actually has a small allowance.
 
-### 15.2 Non-blocking (defaults assumed; say the word to change)
+2. **Two different 48-hour windows.** The hold TTL and the edit window both
+   default to 48 and are separately tunable, and the countdowns in the UI do not
+   spell out which is which. Fine while they match; confusing the day one is
+   changed.
 
-2. **Kids' joint access** — assumed **no**: a child spends only from their own allowance. Toggleable per child in admin.
-3. **Kids' carry-forward** — assumed **yes**, same as ours. It's arguably the most valuable habit the app teaches.
-4. **Advances for kids** — assumed **off** (`allow_advance = 0`). Borrowing against next month is a sharper tool than a child needs, and the transfer-request flow already covers "can I have $20 more?"
-5. **Personal → joint contributions** — assumed **allowed** (you top up Joint for a shared purchase). Say so if you'd rather Joint be fed only by its monthly allocation.
-6. ~~**Timezone**~~ — decided: `America/Los_Angeles`. Both of us are in the Bay Area; this is what decides when the 1st of the month happens.
-7. **Hold expiry** — 48 hours.
-8. **Tight threshold** — amber warning when a purchase leaves under $50.
-9. **Negative balances** — reachable only via advances or an overdrawing settlement, and carried forward. Any hard floor wanted?
-9b. **The reserve threshold is family-wide, and that shows once kids exist.** A flat $50 "nearly out" warning is right for a $200 allowance and meaningless for a $50 one — every purchase reads as amber. Building this surfaced it. Options: make the threshold per-account, or express it as a percentage of the monthly allocation. Not worth changing until someone actually has a small allowance.
-10. **Month-end moment** — a "you saved $X this month" notification on the 1st?
-11. **Full card list** — the six above, plus anything else? Statement close and due dates for each?
-12. **Category list** — starting set: Dining, Shopping, Entertainment, Travel, Gifts, Hobbies, Other. Add or remove?
-13. **Domain** — custom domain (~$10/yr) or the free `budjo.<account>.workers.dev`?
-14. **Starting balances** — begin all accounts at $0, or seed with current real balances?
+3. **Statement close and due days are unset on every card.** The reminder on Home
+   is built and silent until they are filled in under Admin → Cards.
+
+4. **Kids' settings, when the time comes** — joint access (assumed no), advances
+   (assumed off), carry-forward (assumed yes, and arguably the most valuable habit
+   the app teaches). All per-account toggles already, so this is a decision rather
+   than a build.
+
+5. **Historical data** — everything starts from the September 2026 allocations.
+   Nothing earlier was imported and nothing needs to be.
+
+### Answered by use
+
+Timezone is `America/Los_Angeles`. The joint pot is $300 a month against $200
+each, editable in Admin. Display names are set; email addresses are still null on
+both users, which is harmless — the column only supplies a WebAuthn username, and
+passkeys work without it. The domain is `budjo.theserenelifestyle.com` on the
+free Cloudflare plan; the running cost is still $0. The repo is public at
+`github.com/subhassl/budjo`, with no personal data in it.
+
+Refunds, editing, backdating and the by-card view are all built and tested but
+have not yet been used against real data — production currently holds three
+allocations and five spends. Worth knowing when reading the sections above: they
+describe working code, not proven habits.
