@@ -170,6 +170,8 @@ export interface AdminOverview {
   cards: Card[];
   family: import('@budjo/shared').FamilySettings;
   allocationRules: { accountId: string; amountCents: number; effectiveFrom: string }[];
+  /** category id -> preferred card id */
+  cardRules: Record<string, string>;
 }
 
 export const useAdminOverview = (enabled: boolean) =>

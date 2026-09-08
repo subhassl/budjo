@@ -651,5 +651,52 @@ ok('json export carries the reference tables too',
 ok('a member cannot export anything',
    (await call(kidCookie, '/admin/export')).status === 403);
 
+console.log('\n25. Category management');
+const overview = await call(cookie, '/admin/overview');
+ok('the overview returns current card assignments',
+   overview.body.cardRules && typeof overview.body.cardRules === 'object',
+   Object.keys(overview.body).join('|'));
+ok('and they match what was seeded',
+   overview.body.cardRules['cat_dining'] === 'crd_amex_gold',
+   JSON.stringify(overview.body.cardRules));
+
+await call(cookie, '/admin/card-rules', 'POST',
+  { categoryId: 'cat_gifts', cardId: 'crd_target' });
+ok('an assignment can be changed',
+   (await call(cookie, '/admin/overview')).body.cardRules['cat_gifts'] === 'crd_target');
+
+ok('an assignment can be cleared',
+   (await call(cookie, '/admin/card-rules/cat_gifts', 'DELETE')).status === 200
+   && (await call(cookie, '/admin/overview')).body.cardRules['cat_gifts'] === undefined);
+
+ok('the spend flow no longer suggests a card for it',
+   (await call(cookie, '/reference')).body.cardRules['cat_gifts'] === undefined);
+
+const renamed = await call(cookie, '/admin/categories/cat_hobbies', 'PATCH',
+  { name: 'Hobbies & music', icon: '🎸', countsAgainstBudget: true });
+ok('a category can be renamed', renamed.status === 200);
+ok('the new name is served to the app',
+   (await call(cookie, '/reference')).body.categories.some((c) => c.name === 'Hobbies & music'));
+
+await call(cookie, '/admin/categories/cat_other', 'PATCH', { countsAgainstBudget: false });
+ok('a category can be excluded from the budget',
+   (await call(cookie, '/reference')).body.categories
+     .find((c) => c.id === 'cat_other')?.countsAgainstBudget === false);
+
+const created = await call(cookie, '/admin/categories', 'POST',
+  { name: 'Coffee', icon: '☕', sortOrder: 99, countsAgainstBudget: true });
+ok('a category can be added with an icon', created.status === 201, JSON.stringify(created.body));
+const newId = created.body.id;
+ok('it appears with its icon',
+   (await call(cookie, '/reference')).body.categories.find((c) => c.id === newId)?.icon === '☕');
+
+ok('archiving removes it from the pickers',
+   (await call(cookie, `/admin/categories/${newId}`, 'DELETE')).status === 200
+   && !(await call(cookie, '/reference')).body.categories.some((c) => c.id === newId));
+
+ok('a member cannot manage categories',
+   (await call(kidCookie, '/admin/categories', 'POST', { name: 'Sweets', icon: '🍬' })).status === 403
+   && (await call(kidCookie, '/admin/card-rules/cat_dining', 'DELETE')).status === 403);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

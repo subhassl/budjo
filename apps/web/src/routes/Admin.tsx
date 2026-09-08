@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Account, Card as CardType, User } from '@budjo/shared';
+import type { Account, Card as CardType, Category as CategoryType, User } from '@budjo/shared';
 import { formatCents, formatPeriod, parseDollarsToCents, periodOf } from '@budjo/shared';
 import { api, del, patch, post } from '../lib/api';
 import { useAdminMutation, useAdminOverview, type AdminOverview } from '../lib/hooks';
@@ -588,43 +588,177 @@ function CardEditor({
   );
 }
 
+/**
+ * Categories, each with the card we mean to reach for when spending on it —
+ * which is the nudge the whole project was built around, so the current
+ * assignment has to be visible rather than hidden behind a "Pick a card…"
+ * placeholder that made every category look unset.
+ */
 function Reference({ data }: { data: AdminOverview }) {
-  const [categoryName, setCategoryName] = useState('');
-  const addCategory = useAdminMutation((body: unknown) => post('/admin/categories', body));
-  const setRule = useAdminMutation((body: unknown) => post('/admin/card-rules', body));
+  const [adding, setAdding] = useState(false);
+
+  const update = useAdminMutation((input: { id: string; body: unknown }) =>
+    patch(`/admin/categories/${input.id}`, input.body));
+  const archive = useAdminMutation((id: string) => del(`/admin/categories/${id}`));
+  const create = useAdminMutation((body: unknown) => post('/admin/categories', body));
+  const setRule = useAdminMutation((body: { categoryId: string; cardId: string }) =>
+    post('/admin/card-rules', body));
+  const clearRule = useAdminMutation((categoryId: string) =>
+    del(`/admin/card-rules/${categoryId}`));
 
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <div className="muted mb-2 text-xs font-medium tracking-wide uppercase">
-          Category → card we mean to use
+    <div className="flex flex-col gap-3">
+      {data.categories.map((category) => (
+        <CategoryEditor
+          key={category.id}
+          category={category}
+          cards={data.cards}
+          cardId={data.cardRules[category.id] ?? ''}
+          onSave={(body) => update.mutate({ id: category.id, body })}
+          onArchive={() => archive.mutate(category.id)}
+          onCardChange={(cardId) =>
+            cardId
+              ? setRule.mutate({ categoryId: category.id, cardId })
+              : clearRule.mutate(category.id)
+          }
+        />
+      ))}
+
+      <ErrorNote error={update.error ?? archive.error ?? create.error ?? setRule.error ?? clearRule.error} />
+
+      {adding ? (
+        <CategoryEditor
+          key="new"
+          category={{ id: '', name: '', icon: '•', sortOrder: 99, countsAgainstBudget: true }}
+          cards={data.cards}
+          cardId=""
+          isNew
+          onSave={(body) => { create.mutate(body); setAdding(false); }}
+          onArchive={() => setAdding(false)}
+          onCardChange={() => {}}
+        />
+      ) : (
+        <Button variant="secondary" className="w-full" onClick={() => setAdding(true)}>
+          Add a category
+        </Button>
+      )}
+    </div>
+  );
+}
+
+const ICON_CHOICES = ['🍽', '🛍', '🎬', '✈️', '🎁', '🎸', '☕', '⛽', '💊', '🐕', '🎓', '•'];
+
+function CategoryEditor({
+  category, cards, cardId, onSave, onArchive, onCardChange, isNew = false,
+}: {
+  category: CategoryType;
+  cards: CardType[];
+  cardId: string;
+  onSave: (body: unknown) => void;
+  onArchive: () => void;
+  onCardChange: (cardId: string) => void;
+  isNew?: boolean;
+}) {
+  const [open, setOpen] = useState(isNew);
+  const [name, setName] = useState(category.name);
+  const [icon, setIcon] = useState(category.icon);
+  const [counts, setCounts] = useState(category.countsAgainstBudget);
+
+  const card = cards.find((c) => c.id === cardId);
+
+  // Collapsed, a row answers the only question this screen exists for: which
+  // card is this category pointed at?
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center justify-between gap-2 rounded-xl border border-[var(--border)] px-3 py-2.5 text-left"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="text-lg leading-none">{category.icon}</span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm">{category.name}</span>
+            <span className="muted block truncate text-xs">
+              {card ? `→ ${card.name}` : 'No card set'}
+              {category.countsAgainstBudget ? '' : ' · not budgeted'}
+            </span>
+          </span>
+        </span>
+        <span className="muted shrink-0">Edit</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-[var(--border)] p-3">
+      <div className="flex items-end gap-2">
+        <div className="w-16 shrink-0">
+          <Field label="Icon">
+            <TextInput value={icon} maxLength={4} className="text-center"
+                       onChange={(e) => setIcon(e.target.value)} />
+          </Field>
         </div>
-        {data.categories.map((category) => (
-          <div key={category.id} className="mb-1.5 flex items-center gap-2">
-            <span className="w-28 shrink-0 truncate text-sm">{category.icon} {category.name}</span>
-            <Select
-              defaultValue=""
-              onChange={(e) => setRule.mutate({ categoryId: category.id, cardId: e.target.value })}
-            >
-              <option value="" disabled>Pick a card…</option>
-              {data.cards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}
-            </Select>
-          </div>
+        <div className="flex-1">
+          <Field label="Name">
+            <TextInput value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {ICON_CHOICES.map((choice) => (
+          <button
+            key={choice}
+            onClick={() => setIcon(choice)}
+            className={`surface rounded-lg px-2 py-1 text-base ${
+              icon === choice ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]' : ''
+            }`}
+          >
+            {choice}
+          </button>
         ))}
       </div>
 
+      {!isNew ? (
+        <Field label="Card to use" hint="Pre-selected when you pick this category.">
+          <Select value={cardId} onChange={(e) => onCardChange(e.target.value)}>
+            <option value="">No preference</option>
+            {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+        </Field>
+      ) : null}
+
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" checked={counts} className="mt-0.5"
+               onChange={(e) => setCounts(e.target.checked)} />
+        <span>
+          Counts against the budget
+          <span className="muted block text-xs">
+            Turn off to log spending in this category without it using up an allowance.
+          </span>
+        </span>
+      </label>
+
       <div className="flex gap-2">
-        <TextInput value={categoryName} placeholder="New category" onChange={(e) => setCategoryName(e.target.value)} />
+        <Button variant="danger" className="px-3 py-2 text-xs" onClick={onArchive}>
+          {isNew ? 'Cancel' : 'Archive'}
+        </Button>
         <Button
-          variant="secondary"
-          disabled={!categoryName.trim()}
-          onClick={() => { addCategory.mutate({ name: categoryName.trim(), icon: '•', sortOrder: 99 }); setCategoryName(''); }}
+          className="flex-1"
+          disabled={name.trim() === ''}
+          onClick={() => {
+            onSave({
+              name: name.trim(),
+              icon: icon.trim() || '•',
+              countsAgainstBudget: counts,
+              ...(isNew ? { sortOrder: 99 } : {}),
+            });
+            setOpen(isNew);
+          }}
         >
-          Add
+          {isNew ? 'Add category' : 'Save'}
         </Button>
       </div>
-
-      <ErrorNote error={addCategory.error ?? setRule.error} />
     </div>
   );
 }

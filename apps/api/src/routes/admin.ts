@@ -16,7 +16,9 @@ import { getRefundedFor } from '../db/repo';
 import { auditInsert, ledgerInsert } from '../services/ledger';
 import { runMaintenance } from '../services/maintenance';
 import { runBackup } from '../services/backup';
-import { listAccountAccess, listAccounts, listCards, listCategories, listUsers } from '../db/repo';
+import {
+  listAccountAccess, listAccounts, listCardRules, listCards, listCategories, listUsers,
+} from '../db/repo';
 import { badRequest, conflict, notFound } from '../lib/http';
 import { hashCode, newId, newInviteCode } from '../lib/ids';
 import { isoPlusDays, nowIso } from '../lib/time';
@@ -37,12 +39,13 @@ adminRoutes.use('*', async (c, next) => {
 });
 
 adminRoutes.get('/overview', async (c) => {
-  const [users, accounts, access, categories, cards] = await Promise.all([
+  const [users, accounts, access, categories, cards, cardRules] = await Promise.all([
     listUsers(c.env.DB),
     listAccounts(c.env.DB),
     listAccountAccess(c.env.DB),
     listCategories(c.env.DB),
     listCards(c.env.DB),
+    listCardRules(c.env.DB),
   ]);
   const { results: rules } = await c.env.DB
     .prepare(
@@ -52,7 +55,7 @@ adminRoutes.get('/overview', async (c) => {
     .all<{ account_id: string; amount_cents: number; effective_from: string }>();
 
   return c.json({
-    users, accounts, access, categories, cards,
+    users, accounts, access, categories, cards, cardRules,
     family: c.get('family'),
     allocationRules: rules.map((r) => ({
       accountId: r.account_id,
@@ -382,6 +385,14 @@ adminRoutes.post('/card-rules', async (c) => {
        ON CONFLICT(category_id, priority) DO UPDATE SET card_id = excluded.card_id`,
     )
     .bind(body.categoryId, body.cardId)
+    .run();
+  return c.json({ ok: true });
+});
+
+adminRoutes.delete('/card-rules/:categoryId', async (c) => {
+  await c.env.DB
+    .prepare('DELETE FROM category_card_rules WHERE category_id = ?')
+    .bind(c.req.param('categoryId'))
     .run();
   return c.json({ ok: true });
 });
