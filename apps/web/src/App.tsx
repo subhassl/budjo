@@ -1,4 +1,4 @@
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useMe } from './lib/hooks';
 import { Spinner } from './components/ui';
 import { Login } from './routes/Login';
@@ -17,8 +17,37 @@ export function App() {
   const isAdmin = me.data.user.role === 'admin';
 
   return (
-    <div className="mx-auto flex min-h-full max-w-lg flex-col">
-      <main className="flex-1 px-4 pb-28 pt-5">
+    <div className="flex min-h-full flex-col">
+      <TopNav isAdmin={isAdmin} />
+      <Main isAdmin={isAdmin} />
+      <TabBar isAdmin={isAdmin} />
+    </div>
+  );
+}
+
+function useTabs(isAdmin: boolean) {
+  return [
+    { to: '/', label: 'Home', icon: '◎' },
+    { to: '/history', label: 'History', icon: '≡' },
+    ...(isAdmin ? [{ to: '/admin', label: 'Admin', icon: '⚙' }] : []),
+    { to: '/settings', label: 'You', icon: '☺' },
+  ];
+}
+
+function Main({ isAdmin }: { isAdmin: boolean }) {
+  const { pathname } = useLocation();
+
+  // Home and the spend flow are phone-shaped by nature — a single balance and
+  // two buttons stretched across a monitor reads worse, not better. History and
+  // Admin are the pages with rows and forms that genuinely want the width.
+  const wide = pathname.startsWith('/history') || pathname.startsWith('/admin');
+
+  return (
+    <div
+      className={`mx-auto w-full flex-1 px-4 pb-28 pt-5 md:pb-12 ${
+        wide ? 'max-w-5xl' : 'max-w-lg'
+      }`}
+    >
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/check" element={<SpendCheck />} />
@@ -29,26 +58,46 @@ export function App() {
           <Route path="/admin" element={isAdmin ? <Admin /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </main>
-      <TabBar isAdmin={isAdmin} />
-    </div>
+      </div>
+  );
+}
+
+/**
+ * On a large screen the navigation moves to the top: a bar pinned to the bottom
+ * of a monitor is a long way from where you are looking, and the thumb-reach
+ * argument that puts it there on a phone does not apply.
+ */
+function TopNav({ isAdmin }: { isAdmin: boolean }) {
+  return (
+    <header className="surface sticky top-0 z-40 hidden border-x-0 border-t-0 md:block">
+      <nav className="mx-auto flex max-w-5xl items-center gap-1 px-4 py-2.5">
+        <span className="mr-4 text-sm font-semibold tracking-tight">Budjo</span>
+        {useTabs(isAdmin).map((tab) => (
+          <NavLink
+            key={tab.to}
+            to={tab.to}
+            end={tab.to === '/'}
+            className={({ isActive }) =>
+              `rounded-lg px-3 py-1.5 text-sm transition ${
+                isActive ? 'bg-[var(--accent)] font-medium text-black' : 'muted hover:opacity-80'
+              }`
+            }
+          >
+            {tab.label}
+          </NavLink>
+        ))}
+      </nav>
+    </header>
   );
 }
 
 function TabBar({ isAdmin }: { isAdmin: boolean }) {
-  const tabs = [
-    { to: '/', label: 'Home', icon: '◎' },
-    { to: '/history', label: 'History', icon: '≡' },
-    ...(isAdmin ? [{ to: '/admin', label: 'Admin', icon: '⚙' }] : []),
-    { to: '/settings', label: 'You', icon: '☺' },
-  ];
-
   return (
     <nav
-      className="surface fixed inset-x-0 bottom-0 mx-auto flex max-w-lg justify-around rounded-t-2xl px-2 pt-2"
+      className="surface fixed inset-x-0 bottom-0 mx-auto flex max-w-lg justify-around rounded-t-2xl px-2 pt-2 md:hidden"
       style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
     >
-      {tabs.map((tab) => (
+      {useTabs(isAdmin).map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}

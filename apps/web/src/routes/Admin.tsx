@@ -63,6 +63,7 @@ function People({ data }: { data: AdminOverview }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="grid gap-3 lg:grid-cols-2">
       {data.users.map((user) => (
         <UserRow
           key={user.id}
@@ -80,6 +81,7 @@ function People({ data }: { data: AdminOverview }) {
           }}
         />
       ))}
+      </div>
 
       <ErrorNote error={updateUser.error ?? createInvite.error} />
 
@@ -247,6 +249,7 @@ function Accounts({ data }: { data: AdminOverview }) {
         they were given, so history stays explainable.
       </p>
 
+      <div className="grid gap-4 lg:grid-cols-2">
       {data.accounts.map((account) => (
         <AccountEditor
           key={account.id}
@@ -262,6 +265,7 @@ function Accounts({ data }: { data: AdminOverview }) {
           onSaveAccess={(userIds) => setAccess.mutate({ accountId: account.id, userIds })}
         />
       ))}
+      </div>
 
       <ErrorNote error={setAllocation.error ?? updateAccount.error ?? setAccess.error} />
     </div>
@@ -375,7 +379,7 @@ function FamilySettings({ data }: { data: AdminOverview }) {
   const save = useAdminMutation((body: unknown) => patch('/admin/family', body));
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="grid gap-3 sm:max-w-xl sm:grid-cols-2">
       <Field label="Warn when a purchase leaves under" hint="The amber &ldquo;yes, but only just&rdquo; line.">
         <TextInput value={reserve} inputMode="decimal" onChange={(e) => setReserve(e.target.value)} />
       </Field>
@@ -390,8 +394,9 @@ function FamilySettings({ data }: { data: AdminOverview }) {
       <Field label="Timezone" hint="Decides when the 1st of the month happens.">
         <TextInput value={tz} onChange={(e) => setTz(e.target.value)} />
       </Field>
-      <ErrorNote error={save.error} />
+      <div className="sm:col-span-2"><ErrorNote error={save.error} /></div>
       <Button
+        className="sm:col-span-2 sm:justify-self-start sm:px-8"
         onClick={() =>
           save.mutate({
             reserveThresholdCents: parseDollarsToCents(reserve) ?? 0,
@@ -415,8 +420,8 @@ function Adjustments({ data }: { data: AdminOverview }) {
   const adjust = useAdminMutation((body: unknown) => post('/admin/adjustments', body));
 
   return (
-    <div className="flex flex-col gap-3">
-      <p className="muted text-xs">
+    <div className="grid gap-3 sm:max-w-xl sm:grid-cols-2">
+      <p className="muted text-xs sm:col-span-2">
         A correction is a new entry, never an edit — the original stays in history with the
         adjustment beside it.
       </p>
@@ -434,11 +439,14 @@ function Adjustments({ data }: { data: AdminOverview }) {
       <Field label="Amount">
         <TextInput value={amount} inputMode="decimal" onChange={(e) => setAmount(e.target.value)} />
       </Field>
-      <Field label="Reason" hint="Required — it shows up in history.">
-        <TextInput value={note} onChange={(e) => setNote(e.target.value)} />
-      </Field>
-      <ErrorNote error={adjust.error} />
+      <div className="sm:col-span-2">
+        <Field label="Reason" hint="Required — it shows up in history.">
+          <TextInput value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+      </div>
+      <div className="sm:col-span-2"><ErrorNote error={adjust.error} /></div>
       <Button
+        className="sm:col-span-2 sm:justify-self-start sm:px-8"
         disabled={!note.trim() || !amount.trim() || adjust.isPending}
         onClick={() => {
           const cents = parseDollarsToCents(amount) ?? 0;
@@ -471,6 +479,7 @@ function Cards({ data }: { data: AdminOverview }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="grid gap-3 lg:grid-cols-2">
       {data.cards.map((card) => (
         <CardEditor
           key={card.id}
@@ -479,6 +488,7 @@ function Cards({ data }: { data: AdminOverview }) {
           onArchive={() => archive.mutate(card.id)}
         />
       ))}
+      </div>
 
       <ErrorNote error={update.error ?? archive.error ?? create.error} />
 
@@ -608,6 +618,7 @@ function Reference({ data }: { data: AdminOverview }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="grid gap-3 lg:grid-cols-2">
       {data.categories.map((category) => (
         <CategoryEditor
           key={category.id}
@@ -623,6 +634,7 @@ function Reference({ data }: { data: AdminOverview }) {
           }
         />
       ))}
+      </div>
 
       <ErrorNote error={update.error ?? archive.error ?? create.error ?? setRule.error ?? clearRule.error} />
 
@@ -842,6 +854,7 @@ function DataTools({ timezone }: { timezone: string }) {
         ) : null}
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-2">
       <a href="/api/admin/export?format=csv" download>
         <Button variant="secondary" className="w-full">Export everything as CSV</Button>
       </a>
@@ -866,6 +879,7 @@ function DataTools({ timezone }: { timezone: string }) {
       >
         Run the monthly job now
       </Button>
+      </div>
       {result ? <p className="muted text-xs">{result}</p> : null}
 
       <Button

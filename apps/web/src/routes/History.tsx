@@ -90,6 +90,7 @@ export function History() {
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold">History</h1>
 
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
       <Pills
         options={[
           { value: '', label: 'All' },
@@ -113,8 +114,18 @@ export function History() {
         onChange={(v) => setRange(v as DateFilter)}
       />
 
+      <Pills
+        options={[
+          { value: 'entries', label: 'Entries' },
+          { value: 'cards', label: 'By card' },
+        ]}
+        value={view}
+        onChange={(v) => setView(v as 'entries' | 'cards')}
+      />
+      </div>
+
       {range === 'custom' ? (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:max-w-md">
           <Field label="From">
             <TextInput type="date" value={customFrom} max={dateOf(new Date(), timezone)}
                        onChange={(e) => setCustomFrom(e.target.value)} />
@@ -139,15 +150,6 @@ export function History() {
           ) : null}
         </div>
       ) : null}
-
-      <Pills
-        options={[
-          { value: 'entries', label: 'Entries' },
-          { value: 'cards', label: 'By card' },
-        ]}
-        value={view}
-        onChange={(v) => setView(v as 'entries' | 'cards')}
-      />
 
       {view === 'cards' ? (
         <ByCard
@@ -179,26 +181,45 @@ export function History() {
             <Card className="divide-y divide-[var(--border)] overflow-hidden">
               {dayEntries.map((entry) => {
                 const isReversed = reversed.has(entry.id);
+                const flags = [
+                  isReversed ? 'corrected' : null,
+                  entry.refundedCents ? `${formatCents(entry.refundedCents)} returned` : null,
+                ].filter(Boolean).join(' · ');
+                const meta = [
+                  categoryName(entry.categoryId),
+                  cardName(entry.cardId),
+                ].filter(Boolean).join(' · ');
+                const dim = isReversed ? 'line-through opacity-50' : '';
+
                 const row = (
                   <>
-                    <div className="min-w-0">
-                      <div className={`truncate text-sm ${isReversed ? 'line-through opacity-50' : ''}`}>
+                    <div className="min-w-0 flex-1">
+                      <div className={`truncate text-sm ${dim}`}>
                         {entry.note || categoryName(entry.categoryId) || TYPE_LABEL[entry.type]}
                       </div>
-                      <div className="muted truncate text-xs">
-                        {accountName(entry.accountId)}
-                        {entry.type !== 'spend' ? ` · ${TYPE_LABEL[entry.type]}` : ''}
-                        {cardName(entry.cardId) ? ` · ${cardName(entry.cardId)}` : ''}
-                        {isReversed ? ' · corrected' : ''}
-                        {entry.refundedCents
-                          ? ` · ${formatCents(entry.refundedCents)} returned`
-                          : ''}
+                      {/* One dense subtitle on a phone; the same facts get their
+                          own columns once the screen can hold them. */}
+                      <div className="muted truncate text-xs md:hidden">
+                        {[accountName(entry.accountId),
+                          entry.type !== 'spend' ? TYPE_LABEL[entry.type] : null,
+                          cardName(entry.cardId), flags].filter(Boolean).join(' · ')}
                       </div>
                     </div>
+
+                    <div className="muted hidden w-28 shrink-0 truncate text-xs md:block">
+                      {accountName(entry.accountId)}
+                    </div>
+                    <div className="muted hidden w-44 shrink-0 truncate text-xs md:block">
+                      {entry.type === 'spend' ? meta : TYPE_LABEL[entry.type]}
+                    </div>
+                    <div className="muted hidden w-36 shrink-0 truncate text-xs md:block">
+                      {flags}
+                    </div>
+
                     <div
-                      className={`tnum shrink-0 pl-3 text-sm font-medium ${
+                      className={`tnum w-28 shrink-0 pl-3 text-right text-sm font-medium ${
                         entry.amountCents > 0 ? 'text-emerald-500' : ''
-                      } ${isReversed ? 'line-through opacity-50' : ''}`}
+                      } ${dim}`}
                     >
                       {formatCents(entry.amountCents, { sign: entry.amountCents > 0 })}
                     </div>
@@ -209,7 +230,7 @@ export function History() {
                   <button
                     key={entry.id}
                     onClick={() => setEditing(entry)}
-                    className="flex w-full items-center justify-between px-4 py-3 text-left active:opacity-60"
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition active:opacity-60 md:hover:bg-black/[0.03] md:dark:hover:bg-white/[0.03]"
                   >
                     {row}
                   </button>
@@ -403,9 +424,12 @@ function EditSheet({
     && (!asCorrection || reason.trim().length > 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end bg-black/50" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 md:items-center md:p-6"
+      onClick={onClose}
+    >
       <div
-        className="surface max-h-[90vh] w-full overflow-y-auto rounded-t-2xl p-4"
+        className="surface max-h-[90vh] w-full overflow-y-auto rounded-t-2xl p-4 md:max-w-lg md:rounded-2xl"
         style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
         onClick={(e) => e.stopPropagation()}
       >
