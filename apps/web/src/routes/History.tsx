@@ -161,7 +161,9 @@ export function History() {
         {isAdmin ? 'Tap an entry to record a return, edit or correct it.' : 'Tap a purchase to record a return.'}
       </p>
 
-      <div className={refreshing ? 'opacity-50 transition-opacity' : 'transition-opacity'}>
+      <div
+        className={`flex flex-col gap-5 transition-opacity ${refreshing ? 'opacity-50' : ''}`}
+      >
       {entries.length === 0 ? (
         <Empty>
           {range === 'all' ? 'Nothing here yet.' : 'Nothing in this range.'}
@@ -169,7 +171,7 @@ export function History() {
       ) : (
         Object.entries(byDay).map(([day, dayEntries]) => (
           <section key={day}>
-            <h2 className="muted mb-1.5 px-1 text-xs font-medium">
+            <h2 className="muted mb-2 px-1 text-xs font-medium">
               {new Date(`${day}T12:00:00Z`).toLocaleDateString([], {
                 weekday: 'short', month: 'short', day: 'numeric',
               })}
