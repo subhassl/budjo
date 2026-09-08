@@ -599,5 +599,57 @@ ok('but it can be backdated into the month the purchase was in',
    (await call(cookie, '/refunds', 'POST',
      { ledgerEntryId: socks.id, amountCents: 500, occurredOn: `${curPeriod}-02` })).status === 200);
 
+console.log('\n24. Export');
+const csvRes = await fetch(`${BASE}/admin/export?format=csv`, { headers: { Cookie: cookie } });
+const csv = (await csvRes.text()).replace(/^﻿/, '');
+const csvLines = csv.trim().split('\r\n');
+const header = csvLines[0].split(',');
+
+ok('csv resolves names, not just ids',
+   ['account', 'person', 'category', 'card', 'description'].every((col) => header.includes(col)),
+   header.join('|'));
+ok('csv gives dollars as well as cents',
+   header.includes('amount') && header.includes('amount_cents'));
+ok('csv carries the return and correction state',
+   header.includes('returned') && header.includes('corrected'));
+ok('csv dates each row in our own timezone', header[0] === 'date');
+ok('csv starts with a BOM so Excel reads it as UTF-8', csvRes.headers.get('content-type').includes('utf-8'));
+
+const shirtRow = csvLines.find((l) => l.includes('Robinhood Gold') && l.includes('Shirt'));
+ok('a spend row names its card and category', Boolean(shirtRow), shirtRow ?? 'not found');
+ok('and shows the amount in dollars', /-\d+\.\d\d/.test(shirtRow ?? ''), shirtRow ?? '');
+
+// A description containing a comma and quotes must not split the row.
+const tricky = 'Coffee, pastry & "extras"';
+await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_one', estimatedCents: 500, merchant: tricky });
+const csv2 = (await (await fetch(`${BASE}/admin/export?format=csv`, { headers: { Cookie: cookie } })).text())
+  .replace(/^﻿/, '').trim().split('\r\n');
+const trickyLine = csv2.find((l) => l.includes('Coffee'));
+const expectedCell = '"' + tricky.replace(/"/g, '""') + '"';
+ok('a description with commas and quotes is escaped, not split',
+   Boolean(trickyLine) && trickyLine.includes(expectedCell), trickyLine ?? 'not found');
+
+// Count only the commas that sit outside quotes.
+const topLevelCommas = (trickyLine.match(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g) ?? []).length;
+ok('and that row still has exactly the header’s field count',
+   topLevelCommas === header.length - 1,
+   `${topLevelCommas + 1} fields vs ${header.length}`);
+
+const scopedCsv = (await (await fetch(
+  `${BASE}/admin/export?format=csv&periodFrom=${curPeriod}&periodTo=${curPeriod}`,
+  { headers: { Cookie: cookie } })).text()).replace(/^﻿/, '').trim().split('\r\n');
+ok('the export can be scoped to a month', scopedCsv.length < csv2.length,
+   `${scopedCsv.length - 1} rows vs ${csv2.length - 1}`);
+
+const json = await call(cookie, '/admin/export');
+ok('json export carries the reference tables too',
+   Array.isArray(json.body.categories) && Array.isArray(json.body.cards)
+   && Array.isArray(json.body.allocationRules) && Array.isArray(json.body.accountAccess),
+   Object.keys(json.body).join('|'));
+
+ok('a member cannot export anything',
+   (await call(kidCookie, '/admin/export')).status === 403);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

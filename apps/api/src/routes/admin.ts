@@ -21,6 +21,13 @@ import { badRequest, conflict, notFound } from '../lib/http';
 import { hashCode, newId, newInviteCode } from '../lib/ids';
 import { isoPlusDays, nowIso } from '../lib/time';
 
+/** RFC-4180 escaping: a description containing a comma must not split a row. */
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
 export const adminRoutes = new Hono<AppEnv>();
 
 /** Every route below is admin-only; membership is checked once, here. */
@@ -677,34 +684,129 @@ adminRoutes.get('/audit', async (c) => {
   return c.json({ entries: results });
 });
 
+/**
+ * Data export.
+ *
+ * The CSV is the one a person opens in a spreadsheet, so it resolves ids into
+ * names and gives amounts in dollars — an id column and a raw cents column are
+ * no use for reconciling against a statement. The JSON is the machine-readable
+ * form and keeps ids and cents intact.
+ */
 adminRoutes.get('/export', async (c) => {
-  const [ledger, checks, accounts, users] = await Promise.all([
-    c.env.DB.prepare('SELECT * FROM ledger_entries ORDER BY occurred_at').all(),
-    c.env.DB.prepare('SELECT * FROM spend_checks ORDER BY created_at').all(),
-    c.env.DB.prepare('SELECT * FROM accounts').all(),
-    c.env.DB.prepare('SELECT id, display_name, email, role, status FROM users').all(),
-  ]);
+  const family = c.get('family');
+
+  // Same filters as the ledger list, so "export September" works.
+  const clauses: string[] = [];
+  const binds: unknown[] = [];
+  const periodFrom = c.req.query('periodFrom');
+  const periodTo = c.req.query('periodTo');
+  if (periodFrom) { clauses.push('le.period >= ?'); binds.push(periodFrom); }
+  if (periodTo) { clauses.push('le.period <= ?'); binds.push(periodTo); }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
   if (c.req.query('format') === 'csv') {
-    const header = 'id,account_id,type,amount_cents,period,occurred_at,note\n';
-    const rows = (ledger.results as Record<string, unknown>[])
-      .map((r) => [r.id, r.account_id, r.type, r.amount_cents, r.period, r.occurred_at,
-        JSON.stringify(r.note ?? '')].join(','))
-      .join('\n');
-    return new Response(header + rows, {
+    const { results } = await c.env.DB
+      .prepare(
+        `SELECT le.id, le.type, le.amount_cents, le.period, le.occurred_at, le.created_at,
+                le.note, le.spend_check_id, le.voids_entry_id, le.refunds_entry_id,
+                acct.name         AS account_name,
+                usr.display_name  AS person,
+                cat.name          AS category_name,
+                crd.name          AS card_name,
+                crd.last4         AS card_last4,
+                cpy.name          AS counterparty_account,
+                COALESCE((SELECT SUM(r.amount_cents) FROM ledger_entries r
+                           WHERE r.type = 'refund' AND r.refunds_entry_id = le.id), 0) AS refunded_cents,
+                EXISTS(SELECT 1 FROM ledger_entries v
+                        WHERE v.type = 'void' AND v.voids_entry_id = le.id) AS corrected
+           FROM ledger_entries le
+           LEFT JOIN accounts   acct ON acct.id = le.account_id
+           LEFT JOIN users      usr  ON usr.id  = le.actor_user_id
+           LEFT JOIN categories cat  ON cat.id  = le.category_id
+           LEFT JOIN cards      crd  ON crd.id  = le.card_id
+           LEFT JOIN accounts   cpy  ON cpy.id  = le.counterparty_account_id
+           ${where}
+          ORDER BY le.occurred_at, le.id`,
+      )
+      .bind(...binds)
+      .all<Record<string, string | number | null>>();
+
+    const columns = [
+      'date', 'account', 'person', 'type', 'category', 'card', 'description',
+      'amount', 'amount_cents', 'returned', 'corrected', 'period',
+      'occurred_at', 'recorded_at', 'id', 'returns_entry_id', 'corrects_entry_id',
+      'spend_check_id', 'counterparty_account',
+    ];
+
+    const lines = [columns.join(',')];
+    for (const r of results) {
+      const cents = Number(r.amount_cents);
+      lines.push([
+        // The calendar day where we live, not the UTC day: an evening spend
+        // here is already tomorrow in UTC.
+        dateOf(new Date(String(r.occurred_at)), family.timezone),
+        r.account_name,
+        // Allocations and repayments are posted by the monthly job, not a
+        // person; a blank cell there reads as missing data rather than as
+        // nobody.
+        r.person ?? 'system',
+        r.type,
+        r.category_name,
+        r.card_last4 ? `${r.card_name} ••${r.card_last4}` : r.card_name,
+        r.note,
+        (cents / 100).toFixed(2),
+        cents,
+        Number(r.refunded_cents) ? (Number(r.refunded_cents) / 100).toFixed(2) : '',
+        Number(r.corrected) ? 'yes' : '',
+        r.period,
+        r.occurred_at,
+        r.created_at,
+        r.id,
+        r.refunds_entry_id,
+        r.voids_entry_id,
+        r.spend_check_id,
+        r.counterparty_account,
+      ].map(csvCell).join(','));
+    }
+
+    const span = periodFrom || periodTo ? `-${periodFrom ?? 'start'}_${periodTo ?? 'now'}` : '';
+    // Excel needs the BOM to read the file as UTF-8 rather than mangling
+    // accented names.
+    return new Response(`\uFEFF${lines.join('\r\n')}\r\n`, {
       headers: {
-        'Content-Type': 'text/csv',
-        'Content-Disposition': `attachment; filename="budjo-ledger-${nowIso().slice(0, 10)}.csv"`,
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition':
+          `attachment; filename="budjo-ledger${span}-${nowIso().slice(0, 10)}.csv"`,
       },
     });
   }
 
+  const [ledger, checks, accounts, users, categories, cards, rules, access, advances] =
+    await Promise.all([
+      c.env.DB.prepare(`SELECT * FROM ledger_entries le ${where} ORDER BY le.occurred_at`)
+        .bind(...binds).all(),
+      c.env.DB.prepare('SELECT * FROM spend_checks ORDER BY created_at').all(),
+      c.env.DB.prepare('SELECT * FROM accounts').all(),
+      c.env.DB.prepare('SELECT id, display_name, email, role, status FROM users').all(),
+      c.env.DB.prepare('SELECT * FROM categories').all(),
+      c.env.DB.prepare('SELECT * FROM cards').all(),
+      c.env.DB.prepare('SELECT * FROM allocation_rules').all(),
+      c.env.DB.prepare('SELECT * FROM account_access').all(),
+      c.env.DB.prepare('SELECT * FROM advances').all(),
+    ]);
+
   return c.json({
     exportedAt: nowIso(),
+    family,
     users: users.results,
     accounts: accounts.results,
+    accountAccess: access.results,
+    allocationRules: rules.results,
+    categories: categories.results,
+    cards: cards.results,
     ledgerEntries: ledger.results,
     spendChecks: checks.results,
+    advances: advances.results,
   });
 });
 

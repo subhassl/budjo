@@ -33,7 +33,7 @@ export function Admin() {
         <Reference data={data} />
       </Section>
       <Section title="Data">
-        <DataTools />
+        <DataTools timezone={data.family.timezone} />
       </Section>
     </div>
   );
@@ -631,7 +631,8 @@ function Reference({ data }: { data: AdminOverview }) {
 
 interface Snapshot { key: string; size: number; uploadedAt: string }
 
-function DataTools() {
+function DataTools({ timezone }: { timezone: string }) {
+  const thisPeriod = periodOf(new Date(), timezone);
   const [audit, setAudit] = useState<Record<string, unknown>[] | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[] | null>(null);
@@ -708,7 +709,12 @@ function DataTools() {
       </div>
 
       <a href="/api/admin/export?format=csv" download>
-        <Button variant="secondary" className="w-full">Export ledger as CSV</Button>
+        <Button variant="secondary" className="w-full">Export everything as CSV</Button>
+      </a>
+      <a href={`/api/admin/export?format=csv&periodFrom=${thisPeriod}&periodTo=${thisPeriod}`} download>
+        <Button variant="secondary" className="w-full">
+          Export {formatPeriod(thisPeriod)} as CSV
+        </Button>
       </a>
       <a href="/api/admin/export" target="_blank" rel="noreferrer">
         <Button variant="secondary" className="w-full">Export everything as JSON</Button>
