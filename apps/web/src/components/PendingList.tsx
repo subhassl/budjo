@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { AccountSummary, SpendCheck } from '@budjo/shared';
 import { formatCents, parseDollarsToCents } from '@budjo/shared';
 import { useCancelCheck, useSettleCheck } from '../lib/hooks';
-import { Button, Card, ErrorNote, TextInput } from './ui';
+import { Button, Card, ErrorNote, Hint, TextInput } from './ui';
 
 /**
  * Held checks waiting for their real amount.
@@ -34,10 +34,11 @@ export function PendingList({
           <h2 className="px-1 text-xs font-medium tracking-wide text-amber-500 uppercase">
             Did you spend this?
           </h2>
-          <p className="muted px-1 text-xs">
-            The hold ran out. If you spent it, settle it — until you do it is not
-            counted against your balance.
-          </p>
+          <Hint>
+            The hold ran out after two days, so this money is showing as available
+            again. If you did spend it, settle it now — until you do, your balance is
+            higher than it really should be.
+          </Hint>
           {lapsed.map((check) => (
             <PendingRow key={check.id} check={check} accountName={nameFor(check.accountId)} lapsed />
           ))}
@@ -49,6 +50,10 @@ export function PendingList({
           <h2 className="muted px-1 text-xs font-medium tracking-wide uppercase">
             Waiting to be settled
           </h2>
+          <Hint>
+            Held, not spent. Enter what it actually cost — that’s what records it and
+            moves your balance. Leave the box empty to settle at the amount you checked.
+          </Hint>
           {held.map((check) => (
             <PendingRow key={check.id} check={check} accountName={nameFor(check.accountId)} />
           ))}
@@ -94,7 +99,8 @@ function PendingRow({
         <button
           onClick={() => cancel.mutate(check.id)}
           disabled={cancel.isPending}
-          className="muted shrink-0 px-1 py-0.5 text-xs"
+          className="muted shrink-0 px-1 py-0.5 text-xs underline decoration-dotted underline-offset-2"
+          title="Releases the hold and records nothing"
         >
           Didn’t spend it
         </button>

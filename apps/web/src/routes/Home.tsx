@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import type { AccountSummary } from '@budjo/shared';
 import { formatCents, formatPeriod } from '@budjo/shared';
 import { useAccounts, useMe, usePendingChecks } from '../lib/hooks';
-import { Button, Card, ErrorNote, Spinner } from '../components/ui';
+import { Button, Card, Disclosure, ErrorNote, Hint, Spinner } from '../components/ui';
 import { PendingList } from '../components/PendingList';
 
 export function Home() {
@@ -40,7 +40,41 @@ export function Home() {
         <Link to="/check?quick=1">
           <Button variant="secondary" className="w-full">Log a spend I already made</Button>
         </Link>
+        <Hint>
+          Checking first sets the money aside so it can’t be counted twice.
+          Logging records something you’ve already paid for.
+        </Hint>
       </div>
+
+      <Disclosure title="How Budjo works">
+        <Card className="flex flex-col gap-2.5 p-4 text-xs leading-relaxed">
+          <p>
+            <strong>Your balance never resets.</strong> Each month adds your allowance
+            on top of whatever was left, so anything you don’t spend rolls forward for
+            as long as you like.
+          </p>
+          <p>
+            <strong>Check before you buy.</strong> Enter roughly what you’re about to
+            spend and Budjo says yes or no. The amount is then <em>held</em> — still
+            yours, but set aside so a second check can’t approve the same money.
+          </p>
+          <p>
+            <strong>Settle it afterwards.</strong> Nothing is recorded until you enter
+            what it actually cost, which is almost never the estimate once tax and tip
+            land. Settling is what moves the money.
+          </p>
+          <p>
+            <strong>Forgetting is fine.</strong> A hold expires after two days and the
+            money looks available again — but the check doesn’t disappear. It moves to
+            “Did you spend this?” here until you settle or dismiss it.
+          </p>
+          <p>
+            <strong>There’s no override.</strong> If a check is denied you can spend from
+            another account, ask for a transfer, or wait for next month. That’s the whole
+            point of the limit.
+          </p>
+        </Card>
+      </Disclosure>
 
       <PendingList
         checks={pending.data?.checks ?? []}

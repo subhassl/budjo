@@ -6,7 +6,7 @@ import {
   useAccounts, useAdvance, useCreateCheck, useMe, useQuickSpend, useReference, useRepriceCheck,
   useSettleCheck, type CheckResult,
 } from '../lib/hooks';
-import { Button, Card, ErrorNote, Field, Spinner, TextInput } from '../components/ui';
+import { Button, Card, ErrorNote, Field, Hint, Spinner, TextInput } from '../components/ui';
 
 type Step = 'amount' | 'details' | 'verdict';
 
@@ -88,9 +88,16 @@ export function SpendCheck() {
   return (
     <div className="flex flex-col gap-5">
       <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">
-          {quickMode ? 'Log a spend' : 'Can I spend?'}
-        </h1>
+        <div>
+          <h1 className="text-xl font-semibold">
+            {quickMode ? 'Log a spend' : 'Can I spend?'}
+          </h1>
+          <p className="muted text-xs">
+            {quickMode
+              ? 'Records money you have already paid.'
+              : 'Roughly what you’re about to spend — you’ll confirm the real amount after.'}
+          </p>
+        </div>
         <Link to="/" className="muted text-sm">Cancel</Link>
       </header>
 
@@ -248,9 +255,24 @@ function Verdict({
 
   const { check, result, remedies } = outcome;
   const tone = {
-    approved: { bg: 'bg-emerald-500/15 border-emerald-500/30', text: 'text-emerald-500', title: 'Go ahead' },
-    tight: { bg: 'bg-amber-500/15 border-amber-500/30', text: 'text-amber-500', title: 'Yes, but only just' },
-    denied: { bg: 'bg-red-500/15 border-red-500/30', text: 'text-red-500', title: 'Not this time' },
+    approved: {
+      bg: 'bg-emerald-500/15 border-emerald-500/30',
+      text: 'text-emerald-500',
+      title: 'Go ahead',
+      meaning: 'You have room for this with plenty left over.',
+    },
+    tight: {
+      bg: 'bg-amber-500/15 border-amber-500/30',
+      text: 'text-amber-500',
+      title: 'Yes, but only just',
+      meaning: 'You can, but it leaves you near the bottom for the rest of the month.',
+    },
+    denied: {
+      bg: 'bg-red-500/15 border-red-500/30',
+      text: 'text-red-500',
+      title: 'Not this time',
+      meaning: 'More than this account has available right now.',
+    },
   }[result.decision];
 
   async function useRemedy(remedy: Remedy) {
@@ -288,12 +310,21 @@ function Verdict({
             ? `${formatCents(result.shortfallCents)} more than ${accountName} has`
             : `${formatCents(result.remainingCents)} left in ${accountName} afterwards`}
         </div>
+        <div className="muted mt-1 text-xs">{tone.meaning}</div>
       </div>
 
       {result.decision === 'denied' ? (
         <>
           {remedies.length > 0 ? (
             <div className="flex flex-col gap-2">
+              <Hint>
+                {remedies.some((r) => r.kind === 'switch_account')
+                  && remedies.some((r) => r.kind === 'advance')
+                  ? 'You could put it on another account, or borrow it from next month.'
+                  : remedies.some((r) => r.kind === 'switch_account')
+                    ? 'Another account you can spend from has enough for this.'
+                    : 'You can borrow this from next month — it comes off your next allowance.'}
+              </Hint>
               {remedies.map((remedy) => (
                 <Button
                   key={`${remedy.kind}-${remedy.accountId}`}
@@ -314,23 +345,36 @@ function Verdict({
           ) : null}
 
           <Card className="p-4">
-            <p className="muted text-xs">
-              There is no override — that is the point of the limit. Someone else can send you money
-              from their own balance, or you can wait for next month.
+            <p className="muted text-xs leading-relaxed">
+              There’s no override — that’s the point of the limit.{' '}
+              {remedies.length > 0
+                ? 'If none of the above works, someone'
+                : 'Someone'}{' '}
+              else can send you money from their own balance, or it waits until next
+              month’s allowance lands.
             </p>
           </Card>
           <ErrorNote error={reprice.error ?? advance.error ?? createCheck.error} />
         </>
       ) : settled || quickMode ? (
         <Card className="p-4">
-          <p className="muted text-sm">Recorded. Nothing else to do.</p>
+          <p className="text-sm">Recorded.</p>
+          <Hint>
+            Your balance has moved and it’s in History. Nothing else to do.
+          </Hint>
         </Card>
       ) : (
         <Card className="flex flex-col gap-3 p-4">
-          <p className="muted text-sm">
-            Held until {new Date(check.expiresAt).toLocaleString([], { weekday: 'short', hour: 'numeric' })}.
-            Settle it when you know the real amount.
+          <p className="text-sm">
+            <strong>Nothing has been recorded yet.</strong> The amount is held until{' '}
+            {new Date(check.expiresAt).toLocaleString([], { weekday: 'short', hour: 'numeric' })},
+            so it can’t be spent twice.
           </p>
+          <Hint>
+            Settle it with what it actually cost — after tax and tip it rarely matches.
+            You can do this now or later from the home screen, and if you forget we’ll
+            ask you there.
+          </Hint>
           <div className="flex gap-2">
             <TextInput
               value={actual}

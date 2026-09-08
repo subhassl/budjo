@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <div className={`surface rounded-2xl ${className}`}>{children}</div>;
@@ -77,4 +77,29 @@ export function ErrorNote({ error }: { error: unknown }) {
 
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="muted py-16 text-center text-sm">{children}</div>;
+}
+
+/** A quiet line of explanation. Sits under the thing it explains. */
+export function Hint({ children }: { children: ReactNode }) {
+  return <p className="muted px-1 text-xs leading-relaxed">{children}</p>;
+}
+
+/**
+ * Collapsed by default: the people using this need the explanation once, and
+ * then never again. Leaving it open forever would just be clutter.
+ */
+export function Disclosure({ title, children }: { title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="muted flex w-full items-center justify-between px-1 py-1 text-xs"
+      >
+        <span>{title}</span>
+        <span aria-hidden>{open ? '−' : '+'}</span>
+      </button>
+      {open ? <div className="mt-1 flex flex-col gap-2">{children}</div> : null}
+    </div>
+  );
 }
