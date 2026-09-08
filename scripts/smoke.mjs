@@ -515,5 +515,89 @@ const afterDelete = await call(cookie, '/admin/backup', 'POST');
 ok('and the snapshot tracks the database as it changes',
    afterDelete.body.rows === snap.body.rows, `rows ${afterDelete.body.rows}`);
 
+console.log('\n23. Returns');
+const shirt = await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_one', estimatedCents: 6000, categoryId: 'cat_shopping',
+    cardId: 'crd_robinhood', merchant: 'Shirt' });
+const shirtEntry = (await call(cookie, '/ledger?account=acc_one')).body.entries
+  .find((e) => e.note === 'Shirt');
+ok('purchase logged', Boolean(shirtEntry) && shirtEntry.amountCents === -6000);
+
+const balBefore = (await call(cookie, '/accounts')).body.accounts.find((a) => a.accountId === 'acc_one');
+
+const partial = await call(cookie, '/refunds', 'POST',
+  { ledgerEntryId: shirtEntry.id, amountCents: 2500 });
+ok('a partial return is accepted', partial.status === 200, JSON.stringify(partial.body));
+ok('it reports what is left', partial.body.remainingRefundableCents === 3500,
+   JSON.stringify(partial.body));
+
+const balAfter = (await call(cookie, '/accounts')).body.accounts.find((a) => a.accountId === 'acc_one');
+ok('the money comes back to the balance',
+   balAfter.balanceCents - balBefore.balanceCents === 2500,
+   `delta ${balAfter.balanceCents - balBefore.balanceCents}`);
+ok('and the month’s spend total drops by the same',
+   balBefore.spentCents - balAfter.spentCents === 2500,
+   `spent ${balBefore.spentCents} -> ${balAfter.spentCents}`);
+
+const annotated = (await call(cookie, '/ledger?account=acc_one')).body.entries
+  .find((e) => e.id === shirtEntry.id);
+ok('the purchase shows how much came back', annotated.refundedCents === 2500,
+   `refundedCents ${annotated.refundedCents}`);
+
+const refundEntry = (await call(cookie, '/ledger?account=acc_one')).body.entries
+  .find((e) => e.type === 'refund' && e.refundsEntryId === shirtEntry.id);
+ok('the return inherits the card, so statements still reconcile',
+   refundEntry?.cardId === 'crd_robinhood' && refundEntry?.categoryId === 'cat_shopping');
+
+ok('returning more than is left is refused',
+   (await call(cookie, '/refunds', 'POST',
+     { ledgerEntryId: shirtEntry.id, amountCents: 3501 })).status === 409);
+ok('the rest can still be returned',
+   (await call(cookie, '/refunds', 'POST',
+     { ledgerEntryId: shirtEntry.id, amountCents: 3500 })).status === 200);
+ok('and nothing more after that',
+   (await call(cookie, '/refunds', 'POST',
+     { ledgerEntryId: shirtEntry.id, amountCents: 1 })).status === 409);
+
+ok('a purchase with a return cannot be rewritten underneath it',
+   (await call(cookie, `/admin/ledger/${shirtEntry.id}/edit`, 'POST',
+     { amountCents: -100, reason: 'nope' })).status === 409);
+ok('nor deleted outright',
+   (await call(cookie, `/admin/ledger/${shirtEntry.id}`, 'DELETE')).status === 409);
+
+const allocForRefund = (await call(cookie, '/ledger?account=acc_one')).body.entries
+  .find((e) => e.type === 'allocation');
+ok('an allocation cannot be returned',
+   (await call(cookie, '/refunds', 'POST',
+     { ledgerEntryId: allocForRefund.id, amountCents: 100 })).status === 400);
+ok('a return cannot itself be returned',
+   (await call(cookie, '/refunds', 'POST',
+     { ledgerEntryId: refundEntry.id, amountCents: 100 })).status === 400);
+
+ok('you cannot record a return on someone else’s account',
+   (await call(kidCookie, '/refunds', 'POST',
+     { ledgerEntryId: shirtEntry.id, amountCents: 100 })).status === 403);
+
+// Returns are ordinary use, not an admin power: a child must be able to
+// record one against their own spending.
+const kidToy = await call(kidCookie, '/spends', 'POST',
+  { accountId: kid.body.accountId, estimatedCents: 800, merchant: 'Toy' });
+ok('member logged their own purchase', kidToy.body.check?.status === 'settled');
+const kidEntry = (await call(kidCookie, '/ledger')).body.entries.find((e) => e.note === 'Toy');
+ok('a member can return their own purchase',
+   (await call(kidCookie, '/refunds', 'POST',
+     { ledgerEntryId: kidEntry.id, amountCents: 800 })).status === 200);
+
+await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_one', estimatedCents: 1500, merchant: 'Socks' });
+const socks = (await call(cookie, '/ledger?account=acc_one')).body.entries
+  .find((e) => e.note === 'Socks');
+ok('a return cannot be dated in the future',
+   (await call(cookie, '/refunds', 'POST',
+     { ledgerEntryId: socks.id, amountCents: 500, occurredOn: '2099-01-01' })).status === 400);
+ok('but it can be backdated into the month the purchase was in',
+   (await call(cookie, '/refunds', 'POST',
+     { ledgerEntryId: socks.id, amountCents: 500, occurredOn: `${curPeriod}-02` })).status === 200);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

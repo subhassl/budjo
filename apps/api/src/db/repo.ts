@@ -239,6 +239,44 @@ export async function listCardRules(db: D1Database): Promise<Record<string, stri
   return out;
 }
 
+/** Refunded totals for a set of entries, keyed by the entry they return. */
+export async function getRefundedTotals(
+  db: D1Database,
+  entryIds: readonly string[],
+): Promise<Map<string, number>> {
+  if (entryIds.length === 0) return new Map();
+  const { results } = await db
+    .prepare(
+      `SELECT refunds_entry_id, COALESCE(SUM(amount_cents), 0) AS refunded
+         FROM ledger_entries
+        WHERE type = 'refund'
+          AND refunds_entry_id IN (${entryIds.map(() => '?').join(',')})
+        GROUP BY refunds_entry_id`,
+    )
+    .bind(...entryIds)
+    .all<{ refunds_entry_id: string; refunded: number }>();
+  return new Map(results.map((r) => [r.refunds_entry_id, r.refunded]));
+}
+
+export async function getRefundedFor(db: D1Database, entryId: string): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS refunded FROM ledger_entries
+        WHERE type = 'refund' AND refunds_entry_id = ?`,
+    )
+    .bind(entryId)
+    .first<{ refunded: number }>();
+  return row?.refunded ?? 0;
+}
+
+export async function isVoided(db: D1Database, entryId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT id FROM ledger_entries WHERE type = 'void' AND voids_entry_id = ?`)
+    .bind(entryId)
+    .first<{ id: string }>();
+  return Boolean(row);
+}
+
 export async function getSpendCheck(db: D1Database, id: string): Promise<SpendCheck | null> {
   const row = await db.prepare('SELECT * FROM spend_checks WHERE id = ?').bind(id).first<SpendCheckRow>();
   return row ? toSpendCheck(row) : null;

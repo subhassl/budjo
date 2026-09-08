@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { assertCanView, visibleAccounts } from '../domain/access';
-import { getCardTotals, listLedger } from '../db/repo';
+import { getCardTotals, getRefundedTotals, listLedger } from '../db/repo';
 
 export const ledgerRoutes = new Hono<AppEnv>();
 
@@ -36,7 +36,17 @@ ledgerRoutes.get('/ledger', async (c) => {
     limit: Number(c.req.query('limit') ?? 50),
   });
 
-  return c.json(page);
+  // Tell the client how much has come back on each purchase, so a returned
+  // item reads as returned rather than as two unrelated rows.
+  const spendIds = page.entries.filter((e) => e.type === 'spend').map((e) => e.id);
+  const refunded = await getRefundedTotals(c.env.DB, spendIds);
+
+  return c.json({
+    ...page,
+    entries: page.entries.map((e) =>
+      refunded.has(e.id) ? { ...e, refundedCents: refunded.get(e.id) } : e,
+    ),
+  });
 });
 
 /** Per-card totals under the same filters as the ledger list. */

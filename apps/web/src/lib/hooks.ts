@@ -197,6 +197,18 @@ export const useCardTotals = (filters: LedgerFilters, enabled: boolean) =>
     },
   });
 
+export function useCreateRefund() {
+  const refresh = useRefreshMoney();
+  return useMutation({
+    mutationFn: (input: {
+      ledgerEntryId: string; amountCents: number; occurredOn?: string; note?: string;
+    }) => post<{ ok: true; refundedCents: number; remainingRefundableCents: number }>(
+      '/refunds', input, idemKey(),
+    ),
+    onSuccess: refresh,
+  });
+}
+
 export function useEditLedgerEntry() {
   const refresh = useRefreshMoney();
   return useMutation({

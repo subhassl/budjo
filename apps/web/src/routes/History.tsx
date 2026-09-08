@@ -4,8 +4,8 @@ import {
   dateOf, formatCents, formatPeriod, nextPeriod, parseDollarsToCents, periodOf, prevPeriod,
 } from '@budjo/shared';
 import {
-  useAccounts, useCardTotals, useDeleteLedgerEntry, useEditLedgerEntry, useLedger, useMe,
-  useReference, useVoidLedgerEntry,
+  useAccounts, useCardTotals, useCreateRefund, useDeleteLedgerEntry, useEditLedgerEntry,
+  useLedger, useMe, useReference, useVoidLedgerEntry,
 } from '../lib/hooks';
 import { Button, Card, Empty, ErrorNote, Field, Select, Spinner, TextInput } from '../components/ui';
 
@@ -81,7 +81,7 @@ export function History() {
   const reversed = new Set(entries.filter((e) => e.voidsEntryId).map((e) => e.voidsEntryId!));
 
   const byDay = entries.reduce<Record<string, LedgerEntry[]>>((acc, entry) => {
-    const day = entry.occurredAt.slice(0, 10);
+    const day = dateOf(new Date(entry.occurredAt), timezone);
     (acc[day] ??= []).push(entry);
     return acc;
   }, {});
@@ -157,9 +157,9 @@ export function History() {
         />
       ) : (
       <>
-      {isAdmin ? (
-        <p className="muted px-1 text-xs">Tap an entry to edit or correct it.</p>
-      ) : null}
+      <p className="muted px-1 text-xs">
+        {isAdmin ? 'Tap an entry to record a return, edit or correct it.' : 'Tap a purchase to record a return.'}
+      </p>
 
       <div className={refreshing ? 'opacity-50 transition-opacity' : 'transition-opacity'}>
       {entries.length === 0 ? (
@@ -188,6 +188,9 @@ export function History() {
                         {entry.type !== 'spend' ? ` · ${TYPE_LABEL[entry.type]}` : ''}
                         {cardName(entry.cardId) ? ` · ${cardName(entry.cardId)}` : ''}
                         {isReversed ? ' · corrected' : ''}
+                        {entry.refundedCents
+                          ? ` · ${formatCents(entry.refundedCents)} returned`
+                          : ''}
                       </div>
                     </div>
                     <div
@@ -200,7 +203,7 @@ export function History() {
                   </>
                 );
 
-                return isAdmin ? (
+                return (
                   <button
                     key={entry.id}
                     onClick={() => setEditing(entry)}
@@ -208,10 +211,6 @@ export function History() {
                   >
                     {row}
                   </button>
-                ) : (
-                  <div key={entry.id} className="flex items-center justify-between px-4 py-3">
-                    {row}
-                  </div>
                 );
               })}
             </Card>
@@ -242,6 +241,8 @@ export function History() {
           cards={reference.data?.cards ?? []}
           timezone={me.data?.family.timezone ?? 'UTC'}
           editWindowHours={me.data?.family.editWindowHours ?? 48}
+          isAdmin={isAdmin}
+          canSpendHere={(me.data?.spendableAccountIds ?? []).includes(editing.accountId)}
           alreadyReversed={reversed.has(editing.id)}
           onClose={() => setEditing(null)}
         />
@@ -347,7 +348,8 @@ function Pills({
 }
 
 function EditSheet({
-  entry, accounts, categories, cards, timezone, editWindowHours, alreadyReversed, onClose,
+  entry, accounts, categories, cards, timezone, editWindowHours, alreadyReversed,
+  isAdmin, canSpendHere, onClose,
 }: {
   entry: LedgerEntry;
   accounts: AccountSummary[];
@@ -356,6 +358,8 @@ function EditSheet({
   timezone: string;
   editWindowHours: number;
   alreadyReversed: boolean;
+  isAdmin: boolean;
+  canSpendHere: boolean;
   onClose: () => void;
 }) {
   const edit = useEditLedgerEntry();
@@ -368,9 +372,19 @@ function EditSheet({
   const [categoryId, setCategoryId] = useState(entry.categoryId ?? '');
   const [cardId, setCardId] = useState(entry.cardId ?? '');
   const [note, setNote] = useState(entry.note ?? '');
-  const [occurredOn, setOccurredOn] = useState(entry.occurredAt.slice(0, 10));
+  const [occurredOn, setOccurredOn] = useState(dateOf(new Date(entry.occurredAt), timezone));
   const [reason, setReason] = useState('');
   const [forceCorrection, setForceCorrection] = useState(false);
+
+  const refund = useCreateRefund();
+  const refundedSoFar = entry.refundedCents ?? 0;
+  const refundable = entry.type === 'spend' && !alreadyReversed
+    ? Math.max(0, Math.abs(entry.amountCents) - refundedSoFar)
+    : 0;
+  const canRefund = canSpendHere && refundable > 0;
+  const [refundAmount, setRefundAmount] = useState((refundable / 100).toFixed(2));
+  const [refundOn, setRefundOn] = useState(dateOf(new Date(), timezone));
+  const refundCents = parseDollarsToCents(refundAmount);
 
   const today = dateOf(new Date(), timezone);
   const editable = EDITABLE.includes(entry.type);
@@ -402,7 +416,53 @@ function EditSheet({
           <button onClick={onClose} className="muted text-sm">Close</button>
         </div>
 
-        {alreadyReversed ? (
+        {canRefund ? (
+          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-[var(--border)] p-3">
+            <div>
+              <h3 className="text-sm font-medium">Record a return</h3>
+              <p className="muted mt-0.5 text-xs">
+                {formatCents(refundable)} of this purchase can still come back
+                {refundedSoFar > 0 ? ` · ${formatCents(refundedSoFar)} already returned` : ''}.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Amount back">
+                <TextInput value={refundAmount} inputMode="decimal"
+                           onChange={(e) => setRefundAmount(e.target.value)} />
+              </Field>
+              <Field label="When">
+                <TextInput type="date" value={refundOn} max={dateOf(new Date(), timezone)}
+                           onChange={(e) => setRefundOn(e.target.value || dateOf(new Date(), timezone))} />
+              </Field>
+            </div>
+            <ErrorNote error={refund.error} />
+            <Button
+              disabled={refund.isPending || refundCents === null || refundCents <= 0 || refundCents > refundable}
+              onClick={async () => {
+                await refund.mutateAsync({
+                  ledgerEntryId: entry.id,
+                  amountCents: refundCents ?? 0,
+                  occurredOn: refundOn,
+                });
+                onClose();
+              }}
+            >
+              {refund.isPending ? 'Recording…' : 'Record return'}
+            </Button>
+          </div>
+        ) : null}
+
+        {!isAdmin ? (
+          canRefund ? null : (
+            <p className="muted rounded-xl border border-[var(--border)] p-3 text-xs">
+              {entry.type !== 'spend'
+                ? 'Only a purchase can be returned.'
+                : refundable === 0
+                  ? 'This purchase has already been fully returned.'
+                  : 'You can only record returns on your own accounts.'}
+            </p>
+          )
+        ) : alreadyReversed ? (
           <p className="muted mb-3 rounded-xl border border-[var(--border)] p-3 text-xs">
             This entry has already been corrected. Edit the replacement instead.
           </p>
@@ -513,6 +573,12 @@ function EditSheet({
                 ? 'Nothing is overwritten: the original stays, with the correction recorded beside it.'
                 : `Editable in place for another ${hoursLeft}h. After that, changes are kept as corrections.`}
             </p>
+            {refundedSoFar > 0 ? (
+              <p className="muted text-xs">
+                A return is recorded against this purchase, so its amount is locked. Remove the
+                return first if the purchase itself was wrong.
+              </p>
+            ) : null}
           </div>
         )}
       </div>

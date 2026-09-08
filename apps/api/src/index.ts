@@ -8,6 +8,7 @@ import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { ledgerRoutes } from './routes/ledger';
 import { moneyRoutes } from './routes/money';
+import { refundRoutes } from './routes/refunds';
 import { spendCheckRoutes } from './routes/spendChecks';
 import { getFamily } from './db/repo';
 import { runMaintenance } from './services/maintenance';
@@ -53,6 +54,7 @@ api.route('/', accountRoutes);
 api.route('/', spendCheckRoutes);
 api.route('/', ledgerRoutes);
 api.route('/', moneyRoutes);
+api.route('/', refundRoutes);
 api.route('/admin', adminRoutes);
 app.route('/api', api);
 

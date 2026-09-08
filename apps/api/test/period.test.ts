@@ -96,3 +96,36 @@ describe('backdating a spend', () => {
     expect('2027-01-01' > '2026-12-31').toBe(true);
   });
 });
+
+describe('displaying an entry’s day', () => {
+  const PACIFIC = 'America/Los_Angeles';
+
+  /**
+   * A spend at 5:17pm on the 7th in California is stored as 00:17Z on the 8th.
+   * Slicing the timestamp — the obvious thing to write — files it under
+   * tomorrow, and an edit form opened on it would move the entry a day forward
+   * when saved.
+   */
+  it('uses the local day, not the UTC day', () => {
+    const evening = '2026-09-08T00:17:19.802Z';
+    expect(evening.slice(0, 10)).toBe('2026-09-08');
+    expect(dateOf(new Date(evening), PACIFIC)).toBe('2026-09-07');
+  });
+
+  it('agrees with the timestamp when the two do not straddle midnight', () => {
+    const midday = '2026-09-07T19:00:00.000Z';
+    expect(dateOf(new Date(midday), PACIFIC)).toBe('2026-09-07');
+  });
+
+  it('keeps a backdated entry on the day it was given', () => {
+    // Backdated entries are stored at midday UTC precisely so this holds.
+    expect(dateOf(new Date('2026-09-02T12:00:00.000Z'), PACIFIC)).toBe('2026-09-02');
+    expect(dateOf(new Date('2026-09-02T12:00:00.000Z'), 'Asia/Kolkata')).toBe('2026-09-02');
+  });
+
+  it('puts a late-evening spend in the right month at a month boundary', () => {
+    const lastNightOfSeptember = '2026-10-01T02:30:00.000Z'; // 7:30pm Sep 30 PT
+    expect(dateOf(new Date(lastNightOfSeptember), PACIFIC)).toBe('2026-09-30');
+    expect(periodOf(new Date(lastNightOfSeptember), PACIFIC)).toBe('2026-09');
+  });
+});

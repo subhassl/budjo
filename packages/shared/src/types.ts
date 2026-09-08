@@ -120,6 +120,10 @@ export interface LedgerEntry {
   counterpartyAccountId: string | null;
   /** Set on a correction; points at the entry it reverses. */
   voidsEntryId: string | null;
+  /** Set on a refund; points at the purchase it returns. */
+  refundsEntryId: string | null;
+  /** On a spend, how much has been returned against it so far. */
+  refundedCents?: number;
   note: string | null;
   occurredAt: string;
   createdAt: string;

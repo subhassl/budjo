@@ -15,6 +15,7 @@ export interface NewLedgerEntry {
   counterpartyAccountId?: string | null;
   advanceId?: string | null;
   voidsEntryId?: string | null;
+  refundsEntryId?: string | null;
   note?: string | null;
   occurredAt?: string;
   createdBy: string | null;
@@ -23,9 +24,9 @@ export interface NewLedgerEntry {
 const INSERT_SQL = `
   INSERT OR IGNORE INTO ledger_entries
     (id, account_id, actor_user_id, type, amount_cents, period, category_id, card_id,
-     spend_check_id, counterparty_account_id, advance_id, voids_entry_id, note,
-     occurred_at, created_by, created_at)
-  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)`;
+     spend_check_id, counterparty_account_id, advance_id, voids_entry_id,
+     refunds_entry_id, note, occurred_at, created_by, created_at)
+  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)`;
 
 /**
  * Build the insert for one ledger entry. `INSERT OR IGNORE` is what makes the
@@ -48,6 +49,7 @@ export function ledgerInsert(db: D1Database, entry: NewLedgerEntry): D1PreparedS
     entry.counterpartyAccountId ?? null,
     entry.advanceId ?? null,
     entry.voidsEntryId ?? null,
+    entry.refundsEntryId ?? null,
     entry.note ?? null,
     entry.occurredAt ?? now,
     entry.createdBy,

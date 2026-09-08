@@ -11,6 +11,8 @@ import {
   canEditType, canVoidType, editModeFor, editWindowClosesAt, isValidAmountForType,
   isWithinEditWindow, whyNotEditable,
 } from '../domain/ledgerEdits';
+import { blocksEditing, checkRefund, refundRejectionMessage, refundableCents } from '../domain/refunds';
+import { getRefundedFor } from '../db/repo';
 import { auditInsert, ledgerInsert } from '../services/ledger';
 import { runMaintenance } from '../services/maintenance';
 import { runBackup } from '../services/backup';
@@ -424,6 +426,9 @@ adminRoutes.post('/void', async (c) => {
   if (!canVoidType(entry.type as LedgerType)) {
     throw conflict(whyNotEditable(entry.type as LedgerType));
   }
+  if (blocksEditing(await getRefundedFor(c.env.DB, entry.id))) {
+    throw conflict('This purchase has a return recorded against it — remove that first');
+  }
 
   const actor = c.get('user');
   await c.env.DB.batch([
@@ -462,14 +467,14 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
   const entry = await c.env.DB
     .prepare(
       `SELECT id, account_id, type, amount_cents, period, category_id, card_id,
-              spend_check_id, note, occurred_at, created_at
+              spend_check_id, refunds_entry_id, note, occurred_at, created_at
          FROM ledger_entries WHERE id = ?`,
     )
     .bind(c.req.param('id'))
     .first<{
       id: string; account_id: string; type: string; amount_cents: number; period: string;
       category_id: string | null; card_id: string | null; spend_check_id: string | null;
-      note: string | null; occurred_at: string; created_at: string;
+      refunds_entry_id: string | null; note: string | null; occurred_at: string; created_at: string;
     }>();
   if (!entry) throw notFound('No such ledger entry');
 
@@ -481,6 +486,12 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
     .bind(entry.id)
     .first<{ id: string }>();
   if (already) throw conflict('That entry has already been corrected');
+
+  // Refunds were sized against this amount. Changing it underneath them could
+  // leave more returned than was ever spent.
+  if (blocksEditing(await getRefundedFor(c.env.DB, entry.id))) {
+    throw conflict('This purchase has a return recorded against it — remove that first');
+  }
 
   const family = c.get('family');
   const actor = c.get('user');
@@ -503,6 +514,25 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
     throw badRequest(
       type === 'spend' ? 'A spend has to stay a spend' : 'That amount is not valid for this entry',
     );
+  }
+
+  // Raising a refund must not take it past what the purchase was.
+  if (type === 'refund' && entry.refunds_entry_id) {
+    const original = await c.env.DB
+      .prepare('SELECT type, amount_cents FROM ledger_entries WHERE id = ?')
+      .bind(entry.refunds_entry_id)
+      .first<{ type: string; amount_cents: number }>();
+    if (original) {
+      const others = (await getRefundedFor(c.env.DB, entry.refunds_entry_id)) - entry.amount_cents;
+      const target = {
+        type: original.type as 'spend',
+        amountCents: original.amount_cents,
+        voided: false,
+        alreadyRefundedCents: others,
+      };
+      const bad = checkRefund(target, amountCents);
+      if (bad) throw conflict(refundRejectionMessage(bad, refundableCents(target)));
+    }
   }
 
   if (input.occurredOn) {
@@ -579,6 +609,7 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
       categoryId,
       cardId,
       spendCheckId: entry.spend_check_id,
+      refundsEntryId: entry.refunds_entry_id,
       note,
       occurredAt,
       createdBy: actor.id,
@@ -607,6 +638,9 @@ adminRoutes.delete('/ledger/:id', async (c) => {
 
   const type = entry.type as LedgerType;
   if (!canEditType(type)) throw conflict(whyNotEditable(type));
+  if (blocksEditing(await getRefundedFor(c.env.DB, entry.id))) {
+    throw conflict('This purchase has a return recorded against it — remove that first');
+  }
 
   const family = c.get('family');
   if (!isWithinEditWindow(entry.created_at, family.editWindowHours)) {

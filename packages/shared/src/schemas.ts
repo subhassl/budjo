@@ -114,6 +114,15 @@ export const adjustmentSchema = z.object({
   note: z.string().min(1, 'a reason is required').max(500),
 });
 
+export const createRefundSchema = z.object({
+  /** The spend being returned. */
+  ledgerEntryId: idSchema,
+  amountCents: centsSchema.refine((c) => c > 0, 'amount must be more than zero'),
+  /** When the money came back. Defaults to today. */
+  occurredOn: calendarDateSchema.optional(),
+  note: z.string().max(500).nullish(),
+});
+
 export const editLedgerEntrySchema = z.object({
   /** Signed, matching the entry's type: a spend stays negative. */
   amountCents: signedCentsSchema.optional(),
