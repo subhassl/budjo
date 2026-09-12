@@ -14,6 +14,16 @@
   --text: #14161a;
   --muted: #6b7280;
   --accent: #0f9d63;
+
+  /* Chart palette. Categorical slots 1-2 from the validated default order;
+     verified against this app's own chart surface (#ffffff light, #14171c dark)
+     rather than the reference surfaces — contrast and CVD results only mean
+     anything against the surface the chart actually renders on.
+     Worst adjacent CVD dE 24.7 light / 26.8 dark, normal-vision 33.6 / 31.8. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --grid: #e5e4e0;
+  --axis: #c3c2b7;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,6 +34,12 @@
     --text: #e9eaec;
     --muted: #9099a5;
     --accent: #14b87a;
+
+    /* Selected for the dark surface, not flipped from light. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --grid: #24282f;
+    --axis: #383835;
   }
 }
 

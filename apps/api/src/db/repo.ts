@@ -376,22 +376,29 @@ export async function getCardTotals(
   if (q.accountIds.length === 0) return [];
 
   const clauses = [
-    `account_id IN (${q.accountIds.map(() => '?').join(',')})`,
-    `(type IN ('spend','refund')
-      OR (type = 'void' AND voids_entry_id IN
+    `le.account_id IN (${q.accountIds.map(() => '?').join(',')})`,
+    `(le.type IN ('spend','refund')
+      OR (le.type = 'void' AND le.voids_entry_id IN
           (SELECT id FROM ledger_entries WHERE type IN ('spend','refund'))))`,
   ];
   const binds: unknown[] = [...q.accountIds];
-  if (q.periodFrom) { clauses.push('period >= ?'); binds.push(q.periodFrom); }
-  if (q.periodTo) { clauses.push('period <= ?'); binds.push(q.periodTo); }
-  if (q.from) { clauses.push('occurred_at >= ?'); binds.push(q.from); }
-  if (q.to) { clauses.push('occurred_at <= ?'); binds.push(q.to); }
+  if (q.periodFrom) { clauses.push('le.period >= ?'); binds.push(q.periodFrom); }
+  if (q.periodTo) { clauses.push('le.period <= ?'); binds.push(q.periodTo); }
+  if (q.from) { clauses.push('le.occurred_at >= ?'); binds.push(q.from); }
+  if (q.to) { clauses.push('le.occurred_at <= ?'); binds.push(q.to); }
 
+  // A correction carries no card of its own, so it has to be attributed to the
+  // card of whatever it reverses. Grouping on the bare column instead files
+  // every correction under "No card recorded" and drives that bucket negative,
+  // while the card it actually belongs to keeps the full original amount.
   const { results } = await db
     .prepare(
-      `SELECT card_id, COALESCE(SUM(amount_cents), 0) AS net, COUNT(*) AS n
-         FROM ledger_entries WHERE ${clauses.join(' AND ')}
-        GROUP BY card_id`,
+      `SELECT COALESCE(le.card_id, target.card_id) AS card_id,
+              COALESCE(SUM(le.amount_cents), 0) AS net, COUNT(*) AS n
+         FROM ledger_entries le
+         LEFT JOIN ledger_entries target ON target.id = le.voids_entry_id
+        WHERE ${clauses.join(' AND ')}
+        GROUP BY COALESCE(le.card_id, target.card_id)`,
     )
     .bind(...binds)
     .all<{ card_id: string | null; net: number; n: number }>();
@@ -399,4 +406,163 @@ export async function getCardTotals(
   return results
     .map((r) => ({ cardId: r.card_id, spentCents: -r.net, entries: r.n }))
     .sort((a, b) => b.spentCents - a.spentCents);
+}
+
+/**
+ * "Spend-like" entries: purchases, returns against them, and corrections that
+ * reverse either. Kept as one predicate so every aggregate in the app agrees on
+ * what counts as spending — a correction that was excluded here but included in
+ * History would make two screens disagree about the same month.
+ */
+const SPEND_LIKE = `(type IN ('spend','refund')
+   OR (type = 'void' AND voids_entry_id IN
+       (SELECT id FROM ledger_entries WHERE type IN ('spend','refund'))))`;
+
+/**
+ * The same predicate for a query that joins to the voided entry.
+ *
+ * Written out rather than derived from the above by string substitution: the
+ * inner `type` belongs to the subquery and must NOT be qualified with the outer
+ * alias. Correlating it silently drops every correction from the set, which
+ * looks like a tidier answer and is simply wrong.
+ */
+const SPEND_LIKE_LE = `(le.type IN ('spend','refund')
+   OR (le.type = 'void' AND le.voids_entry_id IN
+       (SELECT id FROM ledger_entries WHERE type IN ('spend','refund'))))`;
+
+export interface PeriodRow {
+  period: string;
+  allocatedCents: number;
+  spentCents: number;
+  /** Transfers, advances, adjustments: whatever is neither allocation nor spend. */
+  otherCents: number;
+  netCents: number;
+}
+
+export interface NamedTotal {
+  id: string | null;
+  spentCents: number;
+  entries: number;
+}
+
+export interface AnalyticsQuery {
+  accountIds: readonly string[];
+  periodFrom?: string;
+  periodTo?: string;
+}
+
+function scope(q: AnalyticsQuery, prefix = ''): { where: string; binds: unknown[] } {
+  const col = (name: string) => `${prefix}${name}`;
+  const clauses = [`${col('account_id')} IN (${q.accountIds.map(() => '?').join(',')})`];
+  const binds: unknown[] = [...q.accountIds];
+  if (q.periodFrom) { clauses.push(`${col('period')} >= ?`); binds.push(q.periodFrom); }
+  if (q.periodTo) { clauses.push(`${col('period')} <= ?`); binds.push(q.periodTo); }
+  return { where: clauses.join(' AND '), binds };
+}
+
+/**
+ * Everything the analytics page needs, in one pass per shape.
+ *
+ * Allocated, spent and other sum exactly to the net change in the range, so the
+ * table view under each chart reconciles rather than approximately agreeing.
+ */
+export async function getAnalytics(db: D1Database, q: AnalyticsQuery): Promise<{
+  byPeriod: PeriodRow[];
+  byCategory: NamedTotal[];
+  byCard: NamedTotal[];
+  byAccount: { id: string; allocatedCents: number; spentCents: number }[];
+  openingBalanceCents: number;
+}> {
+  if (q.accountIds.length === 0) {
+    return { byPeriod: [], byCategory: [], byCard: [], byAccount: [], openingBalanceCents: 0 };
+  }
+  const { where, binds } = scope(q);
+  const { where: scoped } = scope(q, 'le.');
+
+  const periodRows = await db
+    .prepare(
+      `SELECT period,
+              COALESCE(SUM(CASE WHEN type = 'allocation' THEN amount_cents END), 0) AS allocated,
+              COALESCE(SUM(CASE WHEN ${SPEND_LIKE} THEN amount_cents END), 0) AS spend_net,
+              COALESCE(SUM(amount_cents), 0) AS net
+         FROM ledger_entries WHERE ${where}
+        GROUP BY period ORDER BY period`,
+    )
+    .bind(...binds)
+    .all<{ period: string; allocated: number; spend_net: number; net: number }>();
+
+  // Corrections carry no category or card, so they are attributed to the entry
+  // they reverse — otherwise a spend and its reversal land in two different
+  // buckets and one of them goes negative.
+  const byCategory = await db
+    .prepare(
+      `SELECT COALESCE(le.category_id, target.category_id) AS id,
+              COALESCE(SUM(le.amount_cents), 0) AS net, COUNT(*) AS n
+         FROM ledger_entries le
+         LEFT JOIN ledger_entries target ON target.id = le.voids_entry_id
+        WHERE ${scoped} AND ${SPEND_LIKE_LE}
+        GROUP BY COALESCE(le.category_id, target.category_id)`,
+    )
+    .bind(...binds)
+    .all<{ id: string | null; net: number; n: number }>();
+
+  const byCard = await db
+    .prepare(
+      `SELECT COALESCE(le.card_id, target.card_id) AS id,
+              COALESCE(SUM(le.amount_cents), 0) AS net, COUNT(*) AS n
+         FROM ledger_entries le
+         LEFT JOIN ledger_entries target ON target.id = le.voids_entry_id
+        WHERE ${scoped} AND ${SPEND_LIKE_LE}
+        GROUP BY COALESCE(le.card_id, target.card_id)`,
+    )
+    .bind(...binds)
+    .all<{ id: string | null; net: number; n: number }>();
+
+  const byAccount = await db
+    .prepare(
+      `SELECT account_id AS id,
+              COALESCE(SUM(CASE WHEN type = 'allocation' THEN amount_cents END), 0) AS allocated,
+              COALESCE(SUM(CASE WHEN ${SPEND_LIKE} THEN amount_cents END), 0) AS spend_net
+         FROM ledger_entries WHERE ${where}
+        GROUP BY account_id`,
+    )
+    .bind(...binds)
+    .all<{ id: string; allocated: number; spend_net: number }>();
+
+  // Where the balance line starts: everything before the range began.
+  let openingBalanceCents = 0;
+  if (q.periodFrom) {
+    const row = await db
+      .prepare(
+        `SELECT COALESCE(SUM(amount_cents), 0) AS opening FROM ledger_entries
+          WHERE account_id IN (${q.accountIds.map(() => '?').join(',')}) AND period < ?`,
+      )
+      .bind(...q.accountIds, q.periodFrom)
+      .first<{ opening: number }>();
+    openingBalanceCents = row?.opening ?? 0;
+  }
+
+  const toTotals = (rows: { id: string | null; net: number; n: number }[]): NamedTotal[] =>
+    rows
+      .map((r) => ({ id: r.id, spentCents: -r.net, entries: r.n }))
+      .filter((r) => r.spentCents !== 0)
+      .sort((a, b) => b.spentCents - a.spentCents);
+
+  return {
+    byPeriod: periodRows.results.map((r) => ({
+      period: r.period,
+      allocatedCents: r.allocated,
+      spentCents: -r.spend_net,
+      otherCents: r.net - r.allocated - r.spend_net,
+      netCents: r.net,
+    })),
+    byCategory: toTotals(byCategory.results),
+    byCard: toTotals(byCard.results),
+    byAccount: byAccount.results.map((r) => ({
+      id: r.id,
+      allocatedCents: r.allocated,
+      spentCents: -r.spend_net,
+    })),
+    openingBalanceCents,
+  };
 }

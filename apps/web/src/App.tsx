@@ -5,6 +5,7 @@ import { Login } from './routes/Login';
 import { Home } from './routes/Home';
 import { SpendCheck } from './routes/SpendCheck';
 import { History } from './routes/History';
+import { Analytics } from './routes/Analytics';
 import { Admin } from './routes/Admin';
 import { Settings } from './routes/Settings';
 
@@ -40,7 +41,9 @@ function Main({ isAdmin }: { isAdmin: boolean }) {
   // Home and the spend flow are phone-shaped by nature — a single balance and
   // two buttons stretched across a monitor reads worse, not better. History and
   // Admin are the pages with rows and forms that genuinely want the width.
-  const wide = pathname.startsWith('/history') || pathname.startsWith('/admin');
+  const wide = pathname.startsWith('/history')
+    || pathname.startsWith('/analytics')
+    || pathname.startsWith('/admin');
 
   return (
     <div
@@ -54,6 +57,7 @@ function Main({ isAdmin }: { isAdmin: boolean }) {
           {/* Pending checks now live on the home screen. */}
           <Route path="/pending" element={<Navigate to="/" replace />} />
           <Route path="/history" element={<History />} />
+          <Route path="/analytics" element={<Analytics />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/admin" element={isAdmin ? <Admin /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

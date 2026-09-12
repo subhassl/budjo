@@ -211,6 +211,36 @@ export function useCreateRefund() {
   });
 }
 
+export interface PeriodRow {
+  period: string;
+  allocatedCents: number;
+  spentCents: number;
+  otherCents: number;
+  netCents: number;
+}
+
+export interface AnalyticsSummary {
+  byPeriod: PeriodRow[];
+  byCategory: { id: string | null; spentCents: number; entries: number }[];
+  byCard: { id: string | null; spentCents: number; entries: number }[];
+  byAccount: { id: string; allocatedCents: number; spentCents: number }[];
+  openingBalanceCents: number;
+}
+
+export const useAnalytics = (filters: LedgerFilters) =>
+  useQuery({
+    queryKey: ['reports', 'summary', filters],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (filters.accountId) params.set('account', filters.accountId);
+      if (filters.periodFrom) params.set('periodFrom', filters.periodFrom);
+      if (filters.periodTo) params.set('periodTo', filters.periodTo);
+      const qs = params.toString();
+      return api<AnalyticsSummary>(`/reports/summary${qs ? `?${qs}` : ''}`);
+    },
+    placeholderData: (previous) => previous,
+  });
+
 export function useEditLedgerEntry() {
   const refresh = useRefreshMoney();
   return useMutation({

@@ -431,6 +431,7 @@ POST   /api/me/sessions/revoke-others
 
 GET    /api/ledger?account&periodFrom&periodTo&from&to&category&card&cursor&limit
 GET    /api/reports/by-card?account&periodFrom&periodTo
+GET    /api/reports/summary?account&periodFrom&periodTo   → the analytics page
 POST   /api/refunds                  { ledgerEntryId, amountCents, occurredOn?, note? }
 
 GET    /api/reports/{by-card,by-category}?period
@@ -511,6 +512,11 @@ A member (child) sees only their own card and the primary actions.
 - **History → By card** — per-card totals under the same filters as the entry
   list, with close and due days. Reconciliation lives here rather than on its own
   screen, so the account and date filters are shared.
+- **Analytics** — linked from History. A hero figure for what was put aside, then
+  the balance at each month end (the line that answers "are we saving?"), allocated
+  against spent by month, and where it went by category, card and account. One
+  filter row (account × month range) scopes every figure on the page, and every
+  chart has a table twin so no value is reachable only by hovering.
 - **Insights** — 12-month trend, category breakdown, savings rate, biggest month.
 - **Admin** — members and roles, accounts with allocation amounts / advance caps / joint access, family settings, categories, cards + rules, adjustments, void, export, audit log.
 - **Settings** — your accounts, your passkeys (with the last one protected from
@@ -574,7 +580,7 @@ accounts · monthly allocation with backfill · spend checks with holds, expiry 
 settlement · denial remedies · direct transfers · advances with per-account caps ·
 history · admin · deployed to Cloudflare on a custom domain.
 
-**Since then.** Backdating a logged spend · editing history (in place inside a
+**Since then.** An analytics page · backdating a logged spend · editing history (in place inside a
 48-hour window, corrections after) · returns, partial or whole · full card and
 category management · History filters, paging and a per-card reconciliation view ·
 CSV and JSON export with names and dollars · weekly R2 snapshots with 12-week
@@ -596,9 +602,12 @@ an account and asking a parent is their only remedy for a denial.
 worker, so it needs a connection.
 
 **Smaller.** Refund of an entry from the by-card view · savings goals · recurring
-spends · receipt photos in R2 · insights and trends, which want a few months of
-real data before they say anything · a PNG icon set, since iOS ignores SVG for
+spends · receipt photos in R2 · a PNG icon set, since iOS ignores SVG for
 home-screen icons · wrangler 3 → 4.
+
+Analytics is built, but it needs months to say anything: with one month of real
+data the trend charts are a single point, and they note as much rather than
+pretending otherwise.
 
 ## 13. Key decisions log
 
@@ -627,6 +636,9 @@ home-screen icons · wrangler 3 → 4.
 | **Everything user-facing renders dates in the family timezone** | Slicing a UTC timestamp files an evening Pacific spend under tomorrow. Bitten twice: once in History, once in the CSV export |
 | **Month filters key on `period`, not timestamps** | Same reason, at the month boundary: a 7pm spend on the 30th is already next month in UTC |
 | **Holds are ignored once expired, everywhere they are summed** | Correctness never depends on the sweep job having run |
+| **One "spend-like" predicate shared by every aggregate** | History, by-card and analytics have to agree on what counts as spending, corrections and returns included; two definitions means two screens disagreeing about one month |
+| **A correction is attributed to the entry it reverses** | It carries no category or card of its own, so grouping on the bare column files it under "Uncategorised" and drives that bucket negative while the real one keeps the full amount |
+| **Chart coordinate space is 1:1 with CSS pixels** | A fixed viewBox scaled to fit shrinks the type with the chart — a 10px axis label rendered at 4px on a phone |
 
 ---
 

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { assertCanView, visibleAccounts } from '../domain/access';
-import { getCardTotals, getRefundedTotals, listLedger } from '../db/repo';
+import { getAnalytics, getCardTotals, getRefundedTotals, listLedger } from '../db/repo';
 
 export const ledgerRoutes = new Hono<AppEnv>();
 
@@ -72,4 +72,32 @@ ledgerRoutes.get('/reports/by-card', async (c) => {
   });
 
   return c.json({ totals });
+});
+
+/**
+ * One call behind the whole analytics page, so every chart is scoped by the same
+ * filter row and the numbers cannot disagree with each other.
+ *
+ * Ranges here are whole months rather than arbitrary days: every chart buckets by
+ * month, and a half-month bucket would misstate a trend rather than narrow it.
+ */
+ledgerRoutes.get('/reports/summary', async (c) => {
+  const ctx = c.get('access');
+  const requested = c.req.query('account');
+
+  let accountIds: string[];
+  if (requested) {
+    assertCanView(ctx, requested);
+    accountIds = [requested];
+  } else {
+    accountIds = visibleAccounts(ctx).map((a) => a.id);
+  }
+
+  const summary = await getAnalytics(c.env.DB, {
+    accountIds,
+    periodFrom: c.req.query('periodFrom'),
+    periodTo: c.req.query('periodTo'),
+  });
+
+  return c.json(summary);
 });

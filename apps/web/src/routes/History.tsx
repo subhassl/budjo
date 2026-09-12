@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { AccountSummary, LedgerEntry, LedgerType } from '@budjo/shared';
 import {
   dateOf, formatCents, formatPeriod, nextPeriod, parseDollarsToCents, periodOf, prevPeriod,
@@ -88,7 +89,10 @@ export function History() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">History</h1>
+      <div className="flex items-baseline justify-between gap-3">
+        <h1 className="text-xl font-semibold">History</h1>
+        <Link to="/analytics" className="text-sm text-[var(--accent)]">Analytics →</Link>
+      </div>
 
       <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
       <Pills

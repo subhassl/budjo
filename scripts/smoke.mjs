@@ -736,5 +736,73 @@ ok('but this one stays signed in', (await call(cookie, '/me')).status === 200);
 
 sql(`DELETE FROM credentials WHERE id IN ('cred_a','cred_b')`);
 
+console.log('\n27. Analytics summary');
+const sum = await call(cookie, '/reports/summary');
+ok('returns every shape the page needs',
+   ['byPeriod', 'byCategory', 'byCard', 'byAccount', 'openingBalanceCents']
+     .every((k) => k in sum.body),
+   Object.keys(sum.body).join('|'));
+
+// The table view under each chart has to reconcile, not approximately agree.
+const reconciles = sum.body.byPeriod.every(
+  (r) => r.allocatedCents - r.spentCents + r.otherCents === r.netCents,
+);
+ok('allocated less spent plus other equals the net change', reconciles,
+   JSON.stringify(sum.body.byPeriod));
+
+// The same money must not be counted differently on two screens.
+const ledgerNet = (await call(cookie, '/ledger')).body.entries
+  .reduce((n, e) => n + e.amountCents, 0);
+const summaryNet = sum.body.byPeriod.reduce((n, r) => n + r.netCents, 0);
+ok('the net agrees with the ledger itself', summaryNet === ledgerNet,
+   `summary ${summaryNet} vs ledger ${ledgerNet}`);
+
+const cardsFromReport = (await call(cookie, '/reports/by-card')).body.totals
+  .filter((t) => t.spentCents !== 0)
+  .reduce((n, t) => n + t.spentCents, 0);
+const cardsFromSummary = sum.body.byCard.reduce((n, t) => n + t.spentCents, 0);
+ok('by-card agrees with the by-card view in History',
+   cardsFromSummary === cardsFromReport,
+   `${cardsFromSummary} vs ${cardsFromReport}`);
+
+ok('spending is reported positive, not as negative ledger amounts',
+   sum.body.byCategory.every((r) => r.spentCents > 0)
+   && sum.body.byPeriod.every((r) => r.spentCents >= 0),
+   JSON.stringify(sum.body.byCategory));
+
+// A return must reduce spending rather than appear as its own category.
+const beforeReturn = (await call(cookie, '/reports/summary')).body.byPeriod
+  .reduce((n, r) => n + r.spentCents, 0);
+await call(cookie, '/spends', 'POST',
+  { accountId: 'acc_one', estimatedCents: 4000, categoryId: 'cat_shopping', merchant: 'Boots' });
+const boots = (await call(cookie, '/ledger?account=acc_one')).body.entries
+  .find((e) => e.note === 'Boots');
+await call(cookie, '/refunds', 'POST', { ledgerEntryId: boots.id, amountCents: 1500 });
+const afterReturn = (await call(cookie, '/reports/summary')).body.byPeriod
+  .reduce((n, r) => n + r.spentCents, 0);
+ok('a return nets off the spending total rather than adding a row',
+   afterReturn - beforeReturn === 2500,
+   `delta ${afterReturn - beforeReturn}, expected 2500`);
+
+const scoped = await call(cookie, `/reports/summary?periodFrom=${curPeriod}&periodTo=${curPeriod}`);
+ok('a month range narrows the buckets',
+   scoped.body.byPeriod.every((r) => r.period === curPeriod),
+   JSON.stringify(scoped.body.byPeriod.map((r) => r.period)));
+ok('and carries an opening balance from before the range',
+   typeof scoped.body.openingBalanceCents === 'number'
+   && scoped.body.openingBalanceCents !== 0,
+   `opening ${scoped.body.openingBalanceCents}`);
+
+const oneAccount = await call(cookie, '/reports/summary?account=acc_joint');
+ok('an account filter narrows every shape',
+   oneAccount.body.byAccount.every((a) => a.id === 'acc_joint'),
+   JSON.stringify(oneAccount.body.byAccount.map((a) => a.id)));
+
+ok('a member only sees their own account',
+   (await call(kidCookie, '/reports/summary')).body.byAccount
+     .every((a) => a.id === kid.body.accountId));
+ok('and cannot ask for someone else’s',
+   (await call(kidCookie, '/reports/summary?account=acc_joint')).status === 404);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
