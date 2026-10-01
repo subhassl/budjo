@@ -59,7 +59,11 @@ export function Analytics() {
     }),
     { allocated: 0, spent: 0, other: 0 },
   );
-  const saved = totals.allocated - totals.spent;
+  // What was kept is everything that came in less what went out. Allocation is
+  // not the only money in — a top-up, a gift or a transfer counts too — so this
+  // must be the ledger's own net, or it disagrees with the balance beside it.
+  const moneyIn = totals.allocated + totals.other;
+  const saved = moneyIn - totals.spent;
 
   // The balance at the end of each month, carried forward from what came before
   // the range — the point of the whole app, so it gets its own chart.
@@ -127,23 +131,24 @@ export function Analytics() {
             {formatCents(saved)}
           </div>
           <div className="muted mt-1 text-xs">
-            {formatCents(totals.allocated)} allocated less {formatCents(totals.spent)} spent
-            {totals.other !== 0 ? (
-              <>
-                {' '}· the balance below also carries {formatCents(totals.other)} of
-                transfers, advances and corrections
-              </>
-            ) : null}
+            {formatCents(totals.allocated)} allocated
+            {totals.other !== 0
+              ? ` ${totals.other > 0 ? 'plus' : 'less'} ${formatCents(Math.abs(totals.other))} of top-ups, transfers and advances,`
+              : ''}{' '}
+            less {formatCents(totals.spent)} spent
           </div>
 
-          <div className="mt-5 grid grid-cols-3 gap-3 text-sm">
+          <div className={`mt-5 grid gap-3 text-sm ${totals.other !== 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
             <Stat label="Allocated" value={totals.allocated} />
+            {totals.other !== 0 ? (
+              <Stat label="Top-ups & transfers" value={totals.other} />
+            ) : null}
             <Stat label="Spent" value={totals.spent} />
             <Stat
               label="Kept"
               value={saved}
-              hint={totals.allocated > 0
-                ? `${Math.round((saved / totals.allocated) * 100)}% of it`
+              hint={moneyIn > 0
+                ? `${Math.round((saved / moneyIn) * 100)}% of what came in`
                 : undefined}
             />
           </div>
@@ -168,12 +173,12 @@ export function Analytics() {
         </ChartFrame>
 
         <ChartFrame
-          title="Allocated against spent"
+          title="Money in against spent"
           subtitle="Bars above each other's month; the gap is what stayed put."
           legend={
             <Legend
               items={[
-                { label: 'Allocated', color: 'var(--series-1)' },
+                { label: 'Money in', color: 'var(--series-1)' },
                 { label: 'Spent', color: 'var(--series-2)' },
               ]}
             />
@@ -182,15 +187,20 @@ export function Analytics() {
           {data.byPeriod.length === 0 ? (
             <EmptyPlot>Nothing in this range yet.</EmptyPlot>
           ) : (
-            <MonthlyColumns rows={data.byPeriod} />
+            <MonthlyColumns
+              rows={data.byPeriod.map((r) => ({
+                ...r,
+                allocatedCents: Math.max(0, r.allocatedCents + r.otherCents),
+              }))}
+            />
           )}
           <TableTwin
-            columns={['Month', 'Allocated', 'Spent', 'Other', 'Net']}
+            columns={['Month', 'Allocated', 'Top-ups & transfers', 'Spent', 'Kept']}
             rows={data.byPeriod.map((r) => [
               formatPeriod(r.period),
               formatCents(r.allocatedCents),
-              formatCents(r.spentCents),
               formatCents(r.otherCents),
+              formatCents(r.spentCents),
               formatCents(r.netCents),
             ])}
           />
@@ -226,7 +236,7 @@ export function Analytics() {
         </div>
 
         {!accountId && data.byAccount.length > 1 ? (
-          <ChartFrame title="By account" subtitle="Allocated and spent per account.">
+          <ChartFrame title="By account" subtitle="Spent per account; kept is what each one netted.">
             <CategoryBars
               rows={data.byAccount
                 .filter((a) => a.spentCents > 0)
@@ -239,7 +249,7 @@ export function Analytics() {
                 nameOf(a.id, 'account'),
                 formatCents(a.allocatedCents),
                 formatCents(a.spentCents),
-                formatCents(a.allocatedCents - a.spentCents),
+                formatCents(a.netCents),
               ])}
             />
           </ChartFrame>

@@ -470,7 +470,7 @@ export async function getAnalytics(db: D1Database, q: AnalyticsQuery): Promise<{
   byPeriod: PeriodRow[];
   byCategory: NamedTotal[];
   byCard: NamedTotal[];
-  byAccount: { id: string; allocatedCents: number; spentCents: number }[];
+  byAccount: { id: string; allocatedCents: number; spentCents: number; netCents: number }[];
   openingBalanceCents: number;
 }> {
   if (q.accountIds.length === 0) {
@@ -522,12 +522,13 @@ export async function getAnalytics(db: D1Database, q: AnalyticsQuery): Promise<{
     .prepare(
       `SELECT account_id AS id,
               COALESCE(SUM(CASE WHEN type = 'allocation' THEN amount_cents END), 0) AS allocated,
-              COALESCE(SUM(CASE WHEN ${SPEND_LIKE} THEN amount_cents END), 0) AS spend_net
+              COALESCE(SUM(CASE WHEN ${SPEND_LIKE} THEN amount_cents END), 0) AS spend_net,
+              COALESCE(SUM(amount_cents), 0) AS net
          FROM ledger_entries WHERE ${where}
         GROUP BY account_id`,
     )
     .bind(...binds)
-    .all<{ id: string; allocated: number; spend_net: number }>();
+    .all<{ id: string; allocated: number; spend_net: number; net: number }>();
 
   // Where the balance line starts: everything before the range began.
   let openingBalanceCents = 0;
@@ -562,6 +563,7 @@ export async function getAnalytics(db: D1Database, q: AnalyticsQuery): Promise<{
       id: r.id,
       allocatedCents: r.allocated,
       spentCents: -r.spend_net,
+      netCents: r.net,
     })),
     openingBalanceCents,
   };

@@ -233,7 +233,7 @@ export function EmptyPlot({ children }: { children: ReactNode }) {
 }
 
 /**
- * Allocated against spent, by month. Two series of the same unit on one axis —
+ * Money in against spent, by month. Two series of the same unit on one axis —
  * never two scales, which would invent a relationship the data doesn't have.
  */
 export function MonthlyColumns({
@@ -257,7 +257,7 @@ export function MonthlyColumns({
   return (
     <div className="relative" ref={ref}>
       <svg viewBox={`0 0 ${W} ${height}`} className="w-full" style={{ height }} role="img"
-           aria-label="Allocated and spent by month">
+           aria-label="Money in and spent by month">
         {ticks(max).map((t) => {
           const y = PAD.top + plotH - (t / max) * plotH;
           return (
@@ -275,7 +275,7 @@ export function MonthlyColumns({
         {rows.map((row, i) => {
           const cx = PAD.left + band * i + band / 2;
           const pair: [number, string, string][] = [
-            [row.allocatedCents, 'var(--series-1)', 'Allocated'],
+            [row.allocatedCents, 'var(--series-1)', 'Money in'],
             [row.spentCents, 'var(--series-2)', 'Spent'],
           ];
           return (
@@ -311,11 +311,11 @@ export function MonthlyColumns({
           width: band,
           top: PAD.top,
           height: plotH,
-          label: `${fullMonth(row.period)}: allocated ${formatCents(row.allocatedCents)}, spent ${formatCents(row.spentCents)}`,
+          label: `${fullMonth(row.period)}: money in ${formatCents(row.allocatedCents)}, spent ${formatCents(row.spentCents)}`,
           onEnter: () => show(((PAD.left + band * i + band / 2) / W) * 100, PAD.top, (
             <>
               <div className="mb-1 font-medium">{fullMonth(row.period)}</div>
-              <TipRow color="var(--series-1)" label="Allocated" value={formatCents(row.allocatedCents)} />
+              <TipRow color="var(--series-1)" label="Money in" value={formatCents(row.allocatedCents)} />
               <TipRow color="var(--series-2)" label="Spent" value={formatCents(row.spentCents)} />
             </>
           )),

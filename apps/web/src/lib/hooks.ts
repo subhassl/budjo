@@ -223,7 +223,7 @@ export interface AnalyticsSummary {
   byPeriod: PeriodRow[];
   byCategory: { id: string | null; spentCents: number; entries: number }[];
   byCard: { id: string | null; spentCents: number; entries: number }[];
-  byAccount: { id: string; allocatedCents: number; spentCents: number }[];
+  byAccount: { id: string; allocatedCents: number; spentCents: number; netCents: number }[];
   openingBalanceCents: number;
 }
 

@@ -750,6 +750,12 @@ const reconciles = sum.body.byPeriod.every(
 ok('allocated less spent plus other equals the net change', reconciles,
    JSON.stringify(sum.body.byPeriod));
 
+// "Kept" per account must be the ledger's net, so top-ups are not left out.
+const sumNet = (rows) => rows.reduce((t, r) => t + r.netCents, 0);
+ok('per-account net adds up to the per-month net',
+   sumNet(sum.body.byAccount) === sumNet(sum.body.byPeriod),
+   `${sumNet(sum.body.byAccount)} vs ${sumNet(sum.body.byPeriod)}`);
+
 // The same money must not be counted differently on two screens.
 const ledgerNet = (await call(cookie, '/ledger')).body.entries
   .reduce((n, e) => n + e.amountCents, 0);
