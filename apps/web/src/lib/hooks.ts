@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  AccountSummary, Card, Category, DecisionResult, LedgerEntry, MeResponse, Remedy, SpendCheck, User,
+  AccountSummary, Card, Category, DecisionResult, InstallmentPlan, LedgerEntry, MeResponse, Remedy, SpendCheck, User,
 } from '@budjo/shared';
 import { api, del, idemKey, post } from './api';
 
@@ -86,7 +86,32 @@ export function useRefreshMoney() {
     void qc.invalidateQueries({ queryKey: ['accounts'] });
     void qc.invalidateQueries({ queryKey: ['checks'] });
     void qc.invalidateQueries({ queryKey: ['ledger'] });
+    void qc.invalidateQueries({ queryKey: ['plans'] });
+    void qc.invalidateQueries({ queryKey: ['reports'] });
   };
+}
+
+export const usePlans = () =>
+  useQuery({ queryKey: ['plans'], queryFn: () => api<{ plans: InstallmentPlan[] }>('/installments') });
+
+export function useCreatePlan() {
+  const refresh = useRefreshMoney();
+  return useMutation({
+    mutationFn: (input: {
+      accountId: string; description: string; totalCents: number; months: number;
+      dayOfMonth: number; firstPeriod?: string;
+      categoryId?: string | null; cardId?: string | null;
+    }) => post<{ ok: true; id: string; postedNow: number }>('/installments', input, idemKey()),
+    onSuccess: refresh,
+  });
+}
+
+export function useCancelPlan() {
+  const refresh = useRefreshMoney();
+  return useMutation({
+    mutationFn: (id: string) => post<{ ok: true }>(`/installments/${id}/cancel`),
+    onSuccess: refresh,
+  });
 }
 
 export function useCreateCheck() {

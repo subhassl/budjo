@@ -329,9 +329,28 @@ With snapshots this becomes `snapshot + SUM(entries after snapshot)`. At our vol
 
 A Cloudflare **Cron Trigger** runs daily at 06:00 UTC and, for each active account, ensures an `allocation` entry exists for the current period in the family's timezone, then posts `advance_repayment` entries for any advances due that period. The unique indexes make both idempotent — running 30 times a month is harmless.
 
-The same routine also runs **lazily on the first request of the day**, so allocations appear even if cron is misconfigured. Two independent paths to the same idempotent write; neither can double-allocate.
+The same routine also runs **lazily on the first request of the day — a day in the family's timezone**, so allocations appear even if cron is misconfigured. The guard used to compare UTC dates, which for a Pacific family meant the 06:00 UTC cron ran at 11pm on the last day of the month, marked the job done, and left the new month unallocated until the next UTC day began at 5pm. Two independent paths to the same idempotent write; neither can double-allocate.
+
+The job also posts **payment plan** charges (below) that have fallen due.
 
 Missed months (app down for a while) are backfilled: the job walks from the last allocation period to the current one. A newly created account allocates from its first `effective_from` period, so adding a child mid-year doesn't retroactively grant them eleven months of allowance.
+
+### Payment plans
+
+Something bought on financing is an `installment_plans` row: an account, a
+total, a number of months, a day of the month and the month of the first
+payment. Each charge is an ordinary `spend` in the ledger, tagged with the plan
+and its payment number, posted by the maintenance job on the plan's day (the
+31st means the last day of a shorter month).
+
+- The total is split into equal payments rounded down to the cent; the last one
+  absorbs the remainder, so they always sum to the total exactly.
+- Nothing about progress is stored on the plan. Paid and remaining are derived
+  from the ledger, so the two cannot drift.
+- Posting catches up: a plan entered part-way through, or a job that missed a
+  week, ends with every due payment in the month it belonged to. A unique index
+  on (plan, payment number) makes re-running harmless.
+- Stopping a plan ends future charges and leaves past ones alone.
 
 ---
 
@@ -454,6 +473,9 @@ DELETE /api/admin/card-rules/:categoryId
 POST   /api/admin/backup             # snapshot to R2 on demand
 GET    /api/admin/backups            # what snapshots exist
 POST   /api/admin/maintenance        # run the monthly job now
+GET    /api/installments             # payment plans on accounts you can see
+POST   /api/installments             # start one (needs spend access)
+POST   /api/installments/:id/cancel  # stop future charges
 GET    /api/admin/export?format=csv|json&periodFrom&periodTo
 GET    /api/admin/audit
 ```
@@ -507,6 +529,9 @@ A member (child) sees only their own card and the primary actions.
   you had to remember to check; the list now sits under the two action buttons,
   beside the balance it affects. Checks whose hold has lapsed appear separately
   under "Did you spend this?" rather than disappearing.
+- **Payment plans** — reached from a row on Home that shows what is still owed
+  and the next charge. Lists each plan with its progress and full schedule, and
+  holds the form to start one, which previews the exact payments before saving.
 - **History** — grouped by day, filterable by account/category/card/person, running balance shown.
 - **Requests** — incoming transfer requests to approve or decline (admins).
 - **History → By card** — per-card totals under the same filters as the entry
@@ -580,7 +605,7 @@ accounts · monthly allocation with backfill · spend checks with holds, expiry 
 settlement · denial remedies · direct transfers · advances with per-account caps ·
 history · admin · deployed to Cloudflare on a custom domain.
 
-**Since then.** An analytics page · backdating a logged spend · editing history (in place inside a
+**Since then.** Payment plans for things bought on financing · an analytics page · backdating a logged spend · editing history (in place inside a
 48-hour window, corrections after) · returns, partial or whole · full card and
 category management · History filters, paging and a per-card reconciliation view ·
 CSV and JSON export with names and dollars · weekly R2 snapshots with 12-week
@@ -638,6 +663,9 @@ pretending otherwise.
 | **Holds are ignored once expired, everywhere they are summed** | Correctness never depends on the sweep job having run |
 | **One "spend-like" predicate shared by every aggregate** | History, by-card and analytics have to agree on what counts as spending, corrections and returns included; two definitions means two screens disagreeing about one month |
 | **A correction is attributed to the entry it reverses** | It carries no category or card of its own, so grouping on the bare column files it under "Uncategorised" and drives that bucket negative while the real one keeps the full amount |
+| **A payment plan charge posts even if the account cannot cover it** | The lender is owed regardless; declining to record it would make the balance wrong, not the debt smaller. The no-override rule is about choosing to spend, and that choice was made at purchase |
+| **Plan progress is derived from the ledger, never stored** | A counter on the plan is a second source of truth that an edit or a correction would silently desync |
+| **"Once a day" means a day in the family's timezone** | Everything the job does is keyed to local dates; a UTC guard treated the job as done for most of the local day it mattered |
 | **Chart coordinate space is 1:1 with CSS pixels** | A fixed viewBox scaled to fit shrinks the type with the chart — a 10px axis label rendered at 4px on a phone |
 
 ---

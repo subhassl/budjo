@@ -42,6 +42,18 @@ export const quickSpendSchema = createSpendCheckSchema.extend({
   occurredOn: calendarDateSchema.optional(),
 });
 
+export const createInstallmentPlanSchema = z.object({
+  accountId: idSchema,
+  description: z.string().trim().min(1, 'say what it is for').max(80),
+  totalCents: centsSchema.refine((c) => c > 0, 'amount must be more than zero'),
+  months: z.number().int().min(1).max(60),
+  dayOfMonth: z.number().int().min(1).max(31),
+  /** Omit to start on the next occurrence of the day. */
+  firstPeriod: periodSchema.optional(),
+  categoryId: idSchema.nullish(),
+  cardId: idSchema.nullish(),
+});
+
 export const createTransferSchema = z.object({
   fromAccountId: idSchema,
   toAccountId: idSchema,

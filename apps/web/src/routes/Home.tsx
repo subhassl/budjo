@@ -3,7 +3,7 @@ import type { AccountSummary } from '@budjo/shared';
 import {
   daysUntilDayOfMonth, describeDaysUntil, formatCents, formatPeriod,
 } from '@budjo/shared';
-import { useAccounts, useMe, usePendingChecks, useReference } from '../lib/hooks';
+import { useAccounts, useMe, usePendingChecks, usePlans, useReference } from '../lib/hooks';
 import { Button, Card, Disclosure, ErrorNote, Hint, Spinner } from '../components/ui';
 import { PendingList } from '../components/PendingList';
 
@@ -54,6 +54,8 @@ export function Home() {
         </Hint>
       </div>
 
+      <PlansLink />
+
       <Disclosure title="How Budjo works">
         <Card className="flex flex-col gap-2.5 p-4 text-xs leading-relaxed">
           <p>
@@ -90,6 +92,49 @@ export function Home() {
         spendableAccountIds={me.data?.spendableAccountIds ?? []}
       />
     </div>
+  );
+}
+
+/**
+ * The way in to payment plans. When something is being paid off it says how
+ * much is still owed and when the next charge lands; otherwise it is one quiet
+ * line, so the feature can be found without taking up the screen.
+ */
+function PlansLink() {
+  const plans = usePlans();
+  const active = (plans.data?.plans ?? []).filter((p) => p.status === 'active');
+  const owed = active.reduce((t, p) => t + p.remainingCents, 0);
+  const next = active
+    .map((p) => p.next)
+    .filter((n): n is NonNullable<typeof n> => n !== null)
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
+
+  return (
+    <Link to="/plans">
+      <Card className="flex items-center justify-between px-4 py-3.5">
+        <div>
+          <div className="text-sm font-medium">Payment plans</div>
+          <div className="muted text-xs">
+            {active.length === 0
+              ? 'Bought something on financing? Set up the monthly charge'
+              : `${active.length} active${next
+                  ? ` · next ${formatCents(next.amountCents)} on ${new Date(`${next.date}T12:00:00Z`)
+                      .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`
+                  : ''}`}
+          </div>
+        </div>
+        <div className="tnum text-right text-sm">
+          {active.length > 0 ? (
+            <>
+              <span className="font-medium">{formatCents(owed)}</span>
+              <span className="muted block text-xs">left to pay</span>
+            </>
+          ) : (
+            <span className="muted" aria-hidden>→</span>
+          )}
+        </div>
+      </Card>
+    </Link>
   );
 }
 

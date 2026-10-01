@@ -646,13 +646,18 @@ adminRoutes.post('/ledger/:id/edit', async (c) => {
  */
 adminRoutes.delete('/ledger/:id', async (c) => {
   const entry = await c.env.DB
-    .prepare('SELECT id, account_id, type, amount_cents, period, note, created_at FROM ledger_entries WHERE id = ?')
+    .prepare('SELECT id, account_id, type, amount_cents, period, note, created_at, installment_plan_id FROM ledger_entries WHERE id = ?')
     .bind(c.req.param('id'))
     .first<{
       id: string; account_id: string; type: string; amount_cents: number;
-      period: string; note: string | null; created_at: string;
+      period: string; note: string | null; created_at: string; installment_plan_id: string | null;
     }>();
   if (!entry) throw notFound('No such ledger entry');
+
+  // Deleting the row would only make the plan charge it again tomorrow.
+  if (entry.installment_plan_id) {
+    throw conflict('This is a payment plan charge — cancel the plan, or edit the amount instead');
+  }
 
   const type = entry.type as LedgerType;
   if (!canEditType(type)) throw conflict(whyNotEditable(type));

@@ -1,7 +1,8 @@
-import { nextPeriod, periodOf, type FamilySettings } from '@budjo/shared';
+import { dateOf, nextPeriod, periodOf, type FamilySettings } from '@budjo/shared';
 import { advancesDue, planAllocations } from '../domain/allocation';
 import { getAllocationRules, getLastAllocatedPeriods, getOpenAdvances, listAccounts } from '../db/repo';
 import { ledgerInsert } from './ledger';
+import { duePaymentStatements } from './installments';
 import { newId } from '../lib/ids';
 import { nowIso } from '../lib/time';
 import { pruneThrottleBuckets } from '../lib/throttle';
@@ -9,6 +10,7 @@ import { pruneThrottleBuckets } from '../lib/throttle';
 export interface MaintenanceResult {
   allocationsPosted: number;
   advancesRepaid: number;
+  installmentsPosted: number;
   checksExpired: number;
   period: string;
 }
@@ -95,6 +97,10 @@ export async function runMaintenance(
     }
   }
 
+  // Payment plans: charge whatever has fallen due, including any days missed.
+  const due = await duePaymentStatements(db, family.timezone, now);
+  statements.push(...due);
+
   statements.push(db.prepare('UPDATE family SET last_maintenance_at = ? WHERE id = ?').bind(iso, family.id));
 
   await pruneThrottleBuckets(db, now);
@@ -104,15 +110,21 @@ export async function runMaintenance(
   return {
     allocationsPosted,
     advancesRepaid,
+    installmentsPosted: due.length,
     checksExpired: expired.meta?.changes ?? 0,
     period: currentPeriod,
   };
 }
 
-/** Cheap guard so the lazy path does real work at most once per UTC day. */
-export function needsMaintenance(lastRunIso: string | null, now = new Date()): boolean {
+/**
+ * Cheap guard so the lazy path does real work at most once a day — a day in the
+ * family's timezone, not UTC. Everything this job does is keyed to local dates
+ * (the month rolling over, a payment's day arriving), and a UTC guard would
+ * consider the job "already run today" for most of the local day it mattered.
+ */
+export function needsMaintenance(lastRunIso: string | null, timeZone: string, now = new Date()): boolean {
   if (!lastRunIso) return true;
-  return lastRunIso.slice(0, 10) < now.toISOString().slice(0, 10);
+  return dateOf(new Date(lastRunIso), timeZone) < dateOf(now, timeZone);
 }
 
 export function nextPeriodAfter(period: string): string {

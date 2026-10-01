@@ -33,7 +33,7 @@ const sql = (s) => execFileSync('npx', ['wrangler', 'd1', 'execute', 'budjo', '-
 // (rather than deleting the D1 file) means this works while `wrangler dev` is
 // holding the database open.
 const TABLES = [
-  'ledger_entries', 'spend_checks', 'advances', 'transfer_requests', 'balance_snapshots',
+  'ledger_entries', 'installment_plans', 'spend_checks', 'advances', 'transfer_requests', 'balance_snapshots',
   'idempotency_keys', 'audit_log', 'allocation_rules', 'account_access', 'credentials',
   'sessions', 'invites', 'category_card_rules', 'categories', 'cards', 'accounts',
   'users', 'family',
@@ -809,6 +809,80 @@ ok('a member only sees their own account',
      .every((a) => a.id === kid.body.accountId));
 ok('and cannot ask for someone else’s',
    (await call(kidCookie, '/reports/summary?account=acc_joint')).status === 404);
+
+console.log('\n28. Payment plans');
+const pp_balanceOf = async (id) =>
+  (await call(cookie, '/accounts')).body.accounts.find((a) => a.accountId === id).balanceCents;
+const pp_shiftPeriod = (p, n) => {
+  const d = new Date(Date.UTC(Number(p.slice(0, 4)), Number(p.slice(5, 7)) - 1 + n, 1));
+  return d.toISOString().slice(0, 7);
+};
+const pp_planOf = async (id, as = cookie) =>
+  (await call(as, '/installments')).body.plans.find((p) => p.id === id);
+
+const pp_beforePlan = await pp_balanceOf('acc_joint');
+// Day 1 of two months ago: three payments are due the moment it is saved.
+const pp_backdated = await call(cookie, '/installments', 'POST', {
+  accountId: 'acc_joint', description: 'Sofa', totalCents: 120001, months: 12,
+  dayOfMonth: 1, firstPeriod: pp_shiftPeriod(curPeriod, -2),
+});
+ok('a plan can be created', pp_backdated.status === 201, JSON.stringify(pp_backdated.body));
+ok('payments already due are charged at once', pp_backdated.body.postedNow === 3,
+   `posted ${pp_backdated.body.postedNow}`);
+ok('and come out of the account', pp_beforePlan - await pp_balanceOf('acc_joint') === 30000,
+   `delta ${pp_beforePlan - await pp_balanceOf('acc_joint')}`);
+
+const pp_sofa = await pp_planOf(pp_backdated.body.id);
+ok('the plan reports what is paid and what is left',
+   pp_sofa.paidCount === 3 && pp_sofa.paidCents === 30000 && pp_sofa.remainingCents === 90001
+   && pp_sofa.remainingCount === 9 && pp_sofa.status === 'active',
+   JSON.stringify({ ...pp_sofa, payments: undefined }));
+ok('the last payment absorbs the odd cent',
+   pp_sofa.payments[11].amountCents === 10001 && pp_sofa.payments[0].amountCents === 10000);
+ok('the next payment is next month’s', pp_sofa.next.period === pp_shiftPeriod(curPeriod, 1),
+   JSON.stringify(pp_sofa.next));
+
+const pp_planEntries = (await call(cookie, `/ledger?account=acc_joint&periodFrom=${pp_shiftPeriod(curPeriod, -2)}&periodTo=${curPeriod}`))
+  .body.entries.filter((e) => /^Sofa \(\d+ of 12\)$/.test(e.note ?? ''));
+ok('each charge is a spend in the month it fell in',
+   pp_planEntries.length === 3 && pp_planEntries.every((e) => e.type === 'spend')
+   && new Set(pp_planEntries.map((e) => e.period)).size === 3,
+   JSON.stringify(pp_planEntries.map((e) => [e.period, e.note])));
+
+await call(cookie, '/admin/maintenance', 'POST');
+ok('running the job again charges nothing twice', (await pp_planOf(pp_backdated.body.id)).paidCount === 3);
+
+ok('a plan charge cannot be deleted out from under the plan',
+   (await call(cookie, `/admin/ledger/${pp_planEntries[0].id}`, 'DELETE')).status === 409);
+
+const pp_future = await call(cookie, '/installments', 'POST', {
+  accountId: 'acc_one', description: 'Laptop', totalCents: 60000, months: 6,
+  dayOfMonth: 15, firstPeriod: pp_shiftPeriod(curPeriod, 1),
+});
+ok('a plan starting next month charges nothing yet',
+   pp_future.status === 201 && pp_future.body.postedNow === 0, JSON.stringify(pp_future.body));
+
+ok('you cannot put a plan on an account you cannot spend from',
+   (await call(cookie, '/installments', 'POST', {
+     accountId: 'acc_two', description: 'Nope', totalCents: 1000, months: 2, dayOfMonth: 1,
+   })).status === 403);
+ok('nonsense terms are rejected',
+   (await call(cookie, '/installments', 'POST', {
+     accountId: 'acc_one', description: 'x', totalCents: 1000, months: 0, dayOfMonth: 40,
+   })).status === 400);
+ok('a member does not see plans on accounts that are not theirs',
+   (await call(kidCookie, '/installments')).body.plans.length === 0);
+ok('and cannot stop one',
+   (await call(kidCookie, `/installments/${pp_future.body.id}/cancel`, 'POST')).status === 403);
+
+ok('a plan can be stopped',
+   (await call(cookie, `/installments/${pp_backdated.body.id}/cancel`, 'POST')).status === 200);
+const pp_stopped = await pp_planOf(pp_backdated.body.id);
+ok('a stopped plan owes nothing more but keeps what was charged',
+   pp_stopped.status === 'cancelled' && pp_stopped.remainingCents === 0 && pp_stopped.paidCents === 30000
+   && pp_stopped.next === null);
+ok('stopping twice is refused',
+   (await call(cookie, `/installments/${pp_backdated.body.id}/cancel`, 'POST')).status === 409);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -37,7 +37,7 @@ export const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {
     .prepare('SELECT last_maintenance_at FROM family WHERE id = ?')
     .bind(family.id)
     .first<{ last_maintenance_at: string | null }>();
-  if (needsMaintenance(lastRun?.last_maintenance_at ?? null)) {
+  if (needsMaintenance(lastRun?.last_maintenance_at ?? null, family.timezone)) {
     await runMaintenance(c.env.DB, family);
     family = await getFamily(c.env.DB);
   }

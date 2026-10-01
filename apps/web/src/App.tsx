@@ -6,6 +6,7 @@ import { Home } from './routes/Home';
 import { SpendCheck } from './routes/SpendCheck';
 import { History } from './routes/History';
 import { Analytics } from './routes/Analytics';
+import { Plans } from './routes/Plans';
 import { Admin } from './routes/Admin';
 import { Settings } from './routes/Settings';
 
@@ -56,6 +57,7 @@ function Main({ isAdmin }: { isAdmin: boolean }) {
           <Route path="/check" element={<SpendCheck />} />
           {/* Pending checks now live on the home screen. */}
           <Route path="/pending" element={<Navigate to="/" replace />} />
+          <Route path="/plans" element={<Plans />} />
           <Route path="/history" element={<History />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/settings" element={<Settings />} />
